@@ -1,0 +1,36 @@
+[project]
+name = "charu-ai"
+version = "0.1.0"
+description = "Productivity assistant chatbot with web and WhatsApp channels"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlmodel>=0.0.22",
+    "asyncpg>=0.30.0",
+    "google-adk>=1.0.0",
+    "firebase-admin>=6.0.0",
+    "twilio>=9.0.0",
+    "phonenumbers>=8.13.0",
+    "python-dotenv>=1.0.0",
+    "pydantic-settings>=2.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "hypothesis>=6.100.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
