@@ -17,5 +17,7 @@ async_session_factory = async_sessionmaker(
 
 async def create_db_tables() -> None:
     """Create all SQLModel tables. Called once during application startup."""
+    import app.models  # noqa: F401 — ensure all table classes are registered in metadata
+
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
