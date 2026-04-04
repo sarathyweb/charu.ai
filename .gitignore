@@ -28,3 +28,6 @@ Thumbs.db
 
 # ADK generated SQLite
 *.adk/session.db
+
+# Other
+secrets/
