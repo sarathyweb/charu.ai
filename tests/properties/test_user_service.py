@@ -113,12 +113,13 @@ def test_web_auth_creates_user_with_firebase_uid(phone, uid):
         try:
             await _cleanup(session, phone, uid)
             svc = UserService(session)
-            user = await svc.ensure_from_firebase(phone, uid)
+            user, created = await svc.ensure_from_firebase(phone, uid)
 
             assert user is not None
             assert user.phone == phone
             assert user.firebase_uid == uid
             assert user.firebase_uid is not None
+            assert created is True
 
             await _cleanup(session, phone, uid)
         finally:
@@ -173,7 +174,7 @@ def test_cross_channel_identity_linking(phone, uid):
             assert wa_user.firebase_uid is None
 
             # Step 2: Web auth links UID to same phone
-            web_user = await svc.ensure_from_firebase(phone, uid)
+            web_user, _ = await svc.ensure_from_firebase(phone, uid)
             assert web_user.firebase_uid == uid
             assert web_user.phone == phone
 
@@ -212,12 +213,12 @@ def test_last_login_timestamp_monotonicity(phone, uid):
             svc = UserService(session)
 
             # First auth — establishes baseline
-            user1 = await svc.ensure_from_firebase(phone, uid)
+            user1, _ = await svc.ensure_from_firebase(phone, uid)
             ts1 = user1.last_login_at
             assert ts1 is not None
 
             # Second auth — should be >= first
-            user2 = await svc.ensure_from_firebase(phone, uid)
+            user2, _ = await svc.ensure_from_firebase(phone, uid)
             ts2 = user2.last_login_at
             assert ts2 is not None
             assert ts2 >= ts1, (
@@ -225,7 +226,7 @@ def test_last_login_timestamp_monotonicity(phone, uid):
             )
 
             # Third auth — should be >= second
-            user3 = await svc.ensure_from_firebase(phone, uid)
+            user3, _ = await svc.ensure_from_firebase(phone, uid)
             ts3 = user3.last_login_at
             assert ts3 is not None
             assert ts3 >= ts2, (
@@ -271,7 +272,7 @@ def test_firebase_uid_conflict_detection(phone, uid_a, uid_b):
             svc = UserService(session)
 
             # Create user with UID-A
-            user = await svc.ensure_from_firebase(phone, uid_a)
+            user, _ = await svc.ensure_from_firebase(phone, uid_a)
             assert user.firebase_uid == uid_a
 
             # Attempt with UID-B on same phone → should raise HTTP 409

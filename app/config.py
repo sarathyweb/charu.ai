@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Base URL for Twilio webhook signature validation (proxy-safe)
     WEBHOOK_BASE_URL: str
 
+    # Comma-separated allowed CORS origins (e.g. "https://app.example.com,http://localhost:3000")
+    CORS_ORIGINS: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

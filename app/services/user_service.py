@@ -25,7 +25,9 @@ class UserService:
         result = await self.session.exec(select(User).where(User.phone == phone))
         return result.first()
 
-    async def ensure_from_firebase(self, phone: str, firebase_uid: str) -> User:
+    async def ensure_from_firebase(
+        self, phone: str, firebase_uid: str
+    ) -> tuple[User, bool]:
         """Get-or-create a user from a verified Firebase login.
 
         * New phone → create with phone + firebase_uid + last_login_at.
@@ -34,6 +36,10 @@ class UserService:
         * Existing user, *different* UID → log security event, raise HTTP 409.
 
         Uses IntegrityError handling for race-condition safety.
+
+        Returns:
+            A tuple of (user, created) where *created* is True only when this
+            call actually inserted a new row.
         """
         phone = normalize_phone(phone)
         now = datetime.now(timezone.utc)
@@ -47,7 +53,7 @@ class UserService:
             try:
                 await self.session.commit()
                 await self.session.refresh(user)
-                return user
+                return user, True
             except IntegrityError:
                 await self.session.rollback()
                 # Race: another request created the user first — retry lookup
@@ -107,7 +113,7 @@ class UserService:
                 # We won the race — refresh and return
                 self.session.expire_all()
                 user = await self.get_by_phone(phone)
-                return user
+                return user, False
 
         if user.firebase_uid == firebase_uid:
             # Same UID — just update last_login_at
@@ -115,7 +121,7 @@ class UserService:
             self.session.add(user)
             await self.session.commit()
             await self.session.refresh(user)
-            return user
+            return user, False
 
         # Different UID — security event
         logger.warning(
