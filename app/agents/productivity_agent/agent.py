@@ -1,7 +1,8 @@
-"""ADK master agent + sub-agent + Google Search tool configuration.
+"""ADK agent configuration — root_agent with sub-agent and Google Search.
 
-Uses Vertex AI backend (GOOGLE_GENAI_USE_VERTEXAI=TRUE) with
-Application Default Credentials for authentication.
+Gemini 3 Flash natively supports combining built-in tools (google_search)
+with custom tools / sub-agents, so no AgentTool wrapper is needed.
+See: https://ai.google.dev/gemini-api/docs/grounding
 """
 
 from google.adk.agents import Agent
@@ -10,9 +11,9 @@ from google.adk.tools import google_search
 # ---------------------------------------------------------------------------
 # Sub-agent: task management specialist
 # ---------------------------------------------------------------------------
-sub_agent = Agent(
+task_manager_agent = Agent(
     name="task_manager",
-    model="gemini-2.5-flash",
+    model="gemini-3-flash-preview",
     description=(
         "Handles task management: creating, listing, updating, "
         "and completing tasks."
@@ -25,11 +26,11 @@ sub_agent = Agent(
 )
 
 # ---------------------------------------------------------------------------
-# Master agent: productivity coordinator
+# Root agent: productivity coordinator
 # ---------------------------------------------------------------------------
-master_agent = Agent(
+root_agent = Agent(
     name="productivity_assistant",
-    model="gemini-2.5-flash",
+    model="gemini-3-flash-preview",
     description="Main productivity assistant that coordinates all tasks.",
     instruction=(
         "You are a productivity assistant. Help users manage tasks, "
@@ -43,6 +44,6 @@ master_agent = Agent(
         "Delegate task management requests (creating, listing, updating, "
         "completing tasks) to the task_manager agent."
     ),
-    sub_agents=[sub_agent],
+    sub_agents=[task_manager_agent],
     tools=[google_search],
 )

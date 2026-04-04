@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Google ADK / Vertex AI
     GOOGLE_CLOUD_PROJECT: str
-    GOOGLE_CLOUD_LOCATION: str = "us-central1"
+    GOOGLE_CLOUD_LOCATION: str = "global"
     GOOGLE_GENAI_USE_VERTEXAI: bool = True
 
     # Path to Firebase service account credentials JSON

@@ -25,3 +25,6 @@ Thumbs.db
 # Pytest
 .pytest_cache/
 .hypothesis/
+
+# ADK generated SQLite
+*.adk/session.db
