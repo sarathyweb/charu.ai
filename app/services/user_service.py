@@ -71,20 +71,15 @@ class UserService:
             # WhatsApp-only user → link Firebase UID atomically.
             # Use UPDATE ... WHERE firebase_uid IS NULL so only one concurrent
             # writer wins; the loser gets rowcount=0 and re-reads.
-            from sqlalchemy import text as sa_text
+            from sqlalchemy import update
 
             try:
-                # Use the underlying SQLAlchemy connection to avoid
-                # SQLModel's deprecation warning on execute() for raw DML.
-                conn = await self.session.connection()
-                result = await conn.execute(
-                    sa_text(
-                        "UPDATE users "
-                        "SET firebase_uid = :uid, last_login_at = :now "
-                        "WHERE phone = :phone AND firebase_uid IS NULL"
-                    ),
-                    {"uid": firebase_uid, "phone": phone, "now": now},
+                stmt = (
+                    update(User)
+                    .where(User.phone == phone, User.firebase_uid.is_(None))
+                    .values(firebase_uid=firebase_uid, last_login_at=now)
                 )
+                result = await self.session.exec(stmt)
                 await self.session.commit()
             except IntegrityError:
                 await self.session.rollback()
@@ -100,7 +95,7 @@ class UserService:
                     detail="Phone linked to different account",
                 )
 
-            if result.rowcount == 0:
+            if result.rowcount == 0:  # type: ignore[union-attr]
                 # Another session linked a UID first — expire stale cache
                 # so re-read fetches the actual firebase_uid from DB.
                 self.session.expire_all()

@@ -11,8 +11,10 @@ class Settings(BaseSettings):
     # PostgreSQL connection string (asyncpg driver)
     DATABASE_URL: str
 
-    # Google ADK / Gemini API key
-    GOOGLE_API_KEY: str
+    # Google ADK / Vertex AI
+    GOOGLE_CLOUD_PROJECT: str
+    GOOGLE_CLOUD_LOCATION: str = "us-central1"
+    GOOGLE_GENAI_USE_VERTEXAI: bool = True
 
     # Path to Firebase service account credentials JSON
     FIREBASE_CREDENTIALS_PATH: str
