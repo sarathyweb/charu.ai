@@ -1,9 +1,21 @@
 """FastAPI application entry point with lifespan, router includes, and CORS."""
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+
+# ---------------------------------------------------------------------------
+# Logging — ADK uses the standard Python logging module internally.
+# See: https://adk.dev/observability/logging/
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+for _name in ("httpx", "httpcore", "google.auth", "urllib3"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 # Load .env into os.environ BEFORE any ADK imports — ADK's genai Client
 # reads GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, etc. directly

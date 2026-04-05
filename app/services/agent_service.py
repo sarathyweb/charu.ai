@@ -80,6 +80,13 @@ class AgentService:
             await self.session.commit()
 
         collected_text = "\n".join(reply_parts) if reply_parts else ""
+        if not collected_text:
+            logger.warning(
+                "ADK agent returned no text for phone=%s session=%s message=%.100s",
+                phone,
+                session_id,
+                message,
+            )
         return AgentRunResult(reply=collected_text, session_id=session_id)
 
     async def _resolve_session(self, phone: str) -> str:

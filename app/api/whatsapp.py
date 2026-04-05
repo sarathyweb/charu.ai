@@ -46,8 +46,16 @@ async def whatsapp_webhook(
         # Strip the "whatsapp:" prefix and normalise to E.164
         phone = normalize_phone(raw_from.removeprefix("whatsapp:"))
 
+        logger.info(
+            "WhatsApp inbound from=%s body_len=%d sid=%s",
+            phone,
+            len(body),
+            message_sid,
+        )
+
         # Empty body → nothing to process
         if not body:
+            logger.info("Empty body from %s — skipping", phone)
             return Response(status_code=200)
 
         # --- Idempotency check (insert-first to prevent race) ----------------
@@ -63,6 +71,7 @@ async def whatsapp_webhook(
             except Exception:
                 # PK conflict → another request already claimed this sid
                 await session.rollback()
+                logger.info("Duplicate MessageSid %s — skipping", message_sid)
                 return Response(status_code=200)
 
         # --- User resolution --------------------------------------------------
@@ -82,7 +91,20 @@ async def whatsapp_webhook(
         # --- Send reply -------------------------------------------------------
         wa_service = WhatsAppService()
         if result.reply and result.reply.strip():
+            logger.info(
+                "WhatsApp reply to %s (session %s): %d chars",
+                phone,
+                result.session_id,
+                len(result.reply),
+            )
             await wa_service.send_reply(to=phone, body=result.reply)
+        else:
+            logger.warning(
+                "Agent returned empty reply for %s (session %s, message: %.100s)",
+                phone,
+                result.session_id,
+                body,
+            )
 
         return Response(status_code=200)
 

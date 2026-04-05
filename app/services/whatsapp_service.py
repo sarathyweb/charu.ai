@@ -33,7 +33,7 @@ class WhatsAppService:
         Errors are logged but never raised — the webhook must always return 200.
         """
         if not body or not body.strip():
-            logger.debug("Skipping WhatsApp reply to %s — empty body", to)
+            logger.warning("Skipping WhatsApp reply to %s — empty body", to)
             return
 
         truncated_body = self._truncate(body)
