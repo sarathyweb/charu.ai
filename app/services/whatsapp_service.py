@@ -9,7 +9,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-MAX_WHATSAPP_LENGTH = 4096
+MAX_WHATSAPP_LENGTH = 1600
 TRUNCATION_SUFFIX = "..."
 
 
@@ -50,7 +50,7 @@ class WhatsAppService:
 
     @staticmethod
     def _truncate(text: str) -> str:
-        """Truncate to 4096 chars, appending '...' when shortened."""
+        """Truncate to 1600 chars, appending '...' when shortened."""
         if len(text) <= MAX_WHATSAPP_LENGTH:
             return text
         return text[: MAX_WHATSAPP_LENGTH - len(TRUNCATION_SUFFIX)] + TRUNCATION_SUFFIX

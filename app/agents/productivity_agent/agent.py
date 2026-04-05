@@ -7,6 +7,16 @@ See: https://ai.google.dev/gemini-api/docs/grounding
 
 from google.adk.agents import Agent
 from google.adk.tools import google_search
+from google.genai import types
+
+# ---------------------------------------------------------------------------
+# Shared generation config — cap output to ~400 tokens so replies stay
+# within Twilio's 1600-character WhatsApp limit (~4 chars/token for English).
+# ---------------------------------------------------------------------------
+_generation_config = types.GenerateContentConfig(
+    max_output_tokens=400,
+    temperature=0.3,
+)
 
 # ---------------------------------------------------------------------------
 # Sub-agent: task management specialist
@@ -21,8 +31,10 @@ task_manager_agent = Agent(
     instruction=(
         "You are a task management specialist. Help users create, "
         "organize, and track their tasks. When the user asks to create, "
-        "list, update, or complete a task, handle it directly."
+        "list, update, or complete a task, handle it directly. "
+        "Keep responses concise."
     ),
+    generate_content_config=_generation_config,
 )
 
 # ---------------------------------------------------------------------------
@@ -34,7 +46,8 @@ root_agent = Agent(
     description="Main productivity assistant that coordinates all tasks.",
     instruction=(
         "You are a productivity assistant. Help users manage tasks, "
-        "find information, and streamline daily workflows.\n\n"
+        "find information, and streamline daily workflows. "
+        "Keep all responses concise and under 1500 characters.\n\n"
         "Use Google Search to find current information when the user "
         "asks about recent events, news, documentation, or anything "
         "that benefits from up-to-date web results.\n\n"
@@ -46,4 +59,5 @@ root_agent = Agent(
     ),
     sub_agents=[task_manager_agent],
     tools=[google_search],
+    generate_content_config=_generation_config,
 )

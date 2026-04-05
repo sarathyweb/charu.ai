@@ -10,7 +10,7 @@ P11 — WhatsApp reply to correct sender:
       **Validates: Requirements 7.5**
 
 P12 — WhatsApp message truncation:
-      Any response string → sent length ≤ 4096 chars.
+      Any response string → sent length ≤ 1600 chars.
       **Validates: Requirements 7.6**
 
 These tests mock the ADK Runner, Twilio client, and database layer so
@@ -139,8 +139,8 @@ def test_whatsapp_reply_to_correct_sender(phone, reply_text):
 @given(text=_any_text)
 @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
 def test_whatsapp_message_truncation(text):
-    """Any response string, after truncation, has length ≤ 4096 chars.
-    If the original exceeds 4096, the result ends with '...'."""
+    """Any response string, after truncation, has length ≤ 1600 chars.
+    If the original exceeds 1600, the result ends with '...'."""
 
     result = WhatsAppService._truncate(text)
 
