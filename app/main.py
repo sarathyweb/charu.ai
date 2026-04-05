@@ -14,6 +14,7 @@ import firebase_admin
 from firebase_admin import credentials
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from google.adk.plugins import ReflectAndRetryToolPlugin
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 
@@ -57,8 +58,9 @@ async def lifespan(app: FastAPI):
         agent=root_agent,
         app_name=APP_NAME,
         session_service=session_service,
+        plugins=[ReflectAndRetryToolPlugin(max_retries=2)],
     )
-    logger.info("ADK Runner and DatabaseSessionService initialized")
+    logger.info("ADK Runner and DatabaseSessionService initialized (with ReflectAndRetry plugin)")
 
     app.state.runner = runner
     app.state.session_service = session_service
