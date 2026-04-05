@@ -3,6 +3,13 @@
 import logging
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
+
+# Load .env into os.environ BEFORE any ADK imports — ADK's genai Client
+# reads GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, etc. directly
+# from os.environ, not from pydantic Settings.
+load_dotenv()
+
 import firebase_admin
 from firebase_admin import credentials
 from fastapi import FastAPI
