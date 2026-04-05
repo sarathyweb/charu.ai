@@ -27,8 +27,15 @@ class WhatsAppService:
     async def send_reply(self, to: str, body: str) -> None:
         """Send a WhatsApp reply, truncating if needed.
 
+        Skips the Twilio API call when *body* is empty or whitespace-only
+        (Twilio rejects messages without a body or media).
+
         Errors are logged but never raised — the webhook must always return 200.
         """
+        if not body or not body.strip():
+            logger.debug("Skipping WhatsApp reply to %s — empty body", to)
+            return
+
         truncated_body = self._truncate(body)
 
         try:

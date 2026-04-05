@@ -81,7 +81,8 @@ async def whatsapp_webhook(
 
         # --- Send reply -------------------------------------------------------
         wa_service = WhatsAppService()
-        await wa_service.send_reply(to=phone, body=result.reply)
+        if result.reply and result.reply.strip():
+            await wa_service.send_reply(to=phone, body=result.reply)
 
         return Response(status_code=200)
 
