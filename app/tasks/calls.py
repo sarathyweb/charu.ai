@@ -488,6 +488,7 @@ async def _run_stale_dispatching_sweep() -> int:
             )
             .values(
                 status=CallLogStatus.SCHEDULED.value,
+                version=CallLog.version + 1,
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(CallLog.id)
@@ -605,7 +606,7 @@ async def _run_trigger_call(call_log_id: int) -> dict[str, str]:
 
     # Build TwiML with proper XML escaping to prevent rejection if any
     # interpolated value contains &, <, ", etc.
-    from xml.sax.saxutils import escape, quoteattr
+    from xml.sax.saxutils import quoteattr
 
     twiml = (
         "<Response>"
