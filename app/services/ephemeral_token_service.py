@@ -65,12 +65,14 @@ async def create_ephemeral_token(user_id: int, service: str) -> str:
     key = f"{_KEY_PREFIX}{token}"
     payload = json.dumps({"user_id": user_id, "service": service})
 
-    r = await _get_redis()
+    r = None
     try:
+        r = await _get_redis()
         await r.set(key, payload, ex=_TTL_SECONDS)
         logger.debug("Ephemeral token created for user_id=%s service=%s", user_id, service)
     finally:
-        await r.aclose()
+        if r is not None:
+            await r.aclose()
 
     return token
 
@@ -94,11 +96,13 @@ async def validate_ephemeral_token(token: str) -> dict | None:
     """
     key = f"{_KEY_PREFIX}{token}"
 
-    r = await _get_redis()
+    r = None
     try:
+        r = await _get_redis()
         raw: str | None = await r.getdel(key)
     finally:
-        await r.aclose()
+        if r is not None:
+            await r.aclose()
 
     if raw is None:
         logger.debug("Ephemeral token not found or already consumed")

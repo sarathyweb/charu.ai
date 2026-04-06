@@ -72,6 +72,13 @@ async def _persist_refreshed_token(
     Uses a dedicated session so the commit does not affect any pending
     mutations on the caller's session.
     """
+    if credentials.token is None:
+        logger.warning(
+            "Skipping token persist for user %s — credentials.token is None",
+            user_id,
+        )
+        return
+
     expiry = (
         credentials.expiry.replace(tzinfo=timezone.utc)
         if credentials.expiry and credentials.expiry.tzinfo is None
@@ -126,9 +133,9 @@ async def google_api_call(
     The raw result from the Google API on success, or a structured error
     ``dict`` with an ``"error"`` key on auth / quota / server failures.
     """
-    token_before = credentials.token
-
     for attempt in range(_MAX_RETRIES + 1):
+        token_before = credentials.token
+
         try:
             result = await asyncio.to_thread(api_callable)
 

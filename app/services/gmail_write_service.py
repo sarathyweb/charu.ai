@@ -206,6 +206,22 @@ async def send_approved_reply(
             user.id,
             draft.thread_id,
         )
+
+        # The rollback discarded all pending changes including the FOR UPDATE
+        # lock.  The email *was* sent via Gmail, so ensure the draft reflects
+        # that — otherwise it stays as 'approved' and could be retried.
+        try:
+            draft_refresh = await session.get(EmailDraftState, draft_id)
+            if draft_refresh and draft_refresh.status != DraftStatus.SENT.value:
+                draft_refresh.status = DraftStatus.SENT.value
+                draft_refresh.updated_at = datetime.now(timezone.utc)
+                session.add(draft_refresh)
+                await session.flush()
+        except Exception:
+            logger.exception(
+                "Failed to mark draft %d as sent after SentReply race", draft_id
+            )
+
         return {
             "status": "already_sent",
             "gmail_message_id": gmail_message_id,

@@ -243,11 +243,6 @@ def _find_split_point(text: str, limit: int) -> int:
     window = text[:limit]
 
     # 1. Try paragraph break (last double-newline within limit)
-    for m in _PARAGRAPH_BREAK.finditer(window):
-        last_para = m.end()
-    else:
-        last_para = 0
-    # re-scan to get the actual last match
     last_para = 0
     for m in _PARAGRAPH_BREAK.finditer(window):
         last_para = m.end()

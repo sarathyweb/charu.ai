@@ -106,6 +106,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.calls.due_row_dispatcher",
         "schedule": crontab(minute="*"),  # every 1 minute
     },
+    # Stale-dispatching sweep: reclaim rows stuck in 'dispatching' for
+    # over 10 minutes (broker publish + revert both failed, or worker crash).
+    "stale-dispatching-sweep": {
+        "task": "app.tasks.calls.stale_dispatching_sweep",
+        "schedule": crontab(minute="*/5"),  # every 5 minutes
+    },
     # ── WhatsApp messaging ───────────────────────────────────────────────
     # Weekly summary sweep: check which users' local time is Sunday 5 PM.
     "weekly-summary-sweep": {

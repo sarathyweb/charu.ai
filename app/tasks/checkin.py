@@ -104,6 +104,13 @@ async def _run_send_midday_checkin(call_log_id: int) -> str:
         if call_log is None:
             return f"CallLog {call_log_id} not found"
 
+        # Guard against Celery retry overwriting the audit timestamp.
+        if call_log.checkin_sent_at is not None:
+            return (
+                f"CallLog {call_log_id} already has checkin_sent_at="
+                f"{call_log.checkin_sent_at}, skipping duplicate check-in"
+            )
+
         # Only completed calls produce check-ins.
         if call_log.status != "completed":
             return (

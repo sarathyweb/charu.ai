@@ -84,17 +84,14 @@ async def complete_task_by_title(
 
 
 async def list_pending_tasks(
+    tool_context: ToolContext,
     limit: int = 5,
-    tool_context: ToolContext = None,
 ) -> dict:
     """Get the user's top pending tasks sorted by priority.
 
     Args:
         limit: Maximum number of tasks to return. Defaults to 5.
     """
-    if tool_context is None:
-        return {"error": "No tool context available."}
-
     phone = tool_context.state.get("phone")
     if not phone:
         return {"error": "No phone number in session state."}

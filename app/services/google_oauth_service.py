@@ -10,6 +10,7 @@ Requirements: 15.3, Implementation Constraints 9
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -24,20 +25,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _fernet: Fernet | None = None
+_fernet_lock = threading.Lock()
 
 
 def _get_fernet() -> Fernet:
     """Return a cached Fernet instance using the env-var key."""
     global _fernet  # noqa: PLW0603
     if _fernet is None:
-        key = get_settings().OAUTH_TOKEN_ENCRYPTION_KEY
-        if not key:
-            raise RuntimeError(
-                "OAUTH_TOKEN_ENCRYPTION_KEY is not set. "
-                "Generate one with: python -c "
-                '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
-            )
-        _fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        with _fernet_lock:
+            # Double-check after acquiring the lock
+            if _fernet is None:
+                key = get_settings().OAUTH_TOKEN_ENCRYPTION_KEY
+                if not key:
+                    raise RuntimeError(
+                        "OAUTH_TOKEN_ENCRYPTION_KEY is not set. "
+                        "Generate one with: python -c "
+                        '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+                    )
+                _fernet = Fernet(key.encode() if isinstance(key, str) else key)
     return _fernet
 
 

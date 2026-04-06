@@ -346,3 +346,69 @@ async def test_draft_not_found_returns_error(session):
 
     assert result["status"] == "error"
     assert "not found" in result["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_integrity_error_race_marks_draft_as_sent(session):
+    """When a concurrent SentReply insert causes IntegrityError, the service
+    should attempt to mark the draft as 'sent' after rollback so it doesn't
+    stay as 'approved' and risk a duplicate resend on retry.
+
+    We verify this by checking that session.get + flush are called in the
+    recovery path after the rollback."""
+    user = await _ensure_user(session)
+    draft = await _create_approved_draft(session, user, thread_id="thread_race")
+    draft_id = draft.id
+
+    mock_gmail_result = {"id": "msg_race_loser", "threadId": "thread_race"}
+
+    # We need to track what happens after rollback.  Use a real session
+    # but intercept the flush to raise IntegrityError on SentReply insert.
+    original_session_flush = session.flush
+    original_session_rollback = session.rollback
+    recovery_get_called = False
+    recovery_flush_called = False
+
+    async def patched_flush(*args, **kwargs):
+        """Raise IntegrityError when the SentReply insert is flushed."""
+        nonlocal recovery_flush_called
+        new_objects = list(session.new)
+        has_sent_reply = any(isinstance(obj, SentReply) for obj in new_objects)
+        if has_sent_reply:
+            raise IntegrityError(
+                "duplicate key value violates unique constraint",
+                params={},
+                orig=Exception("unique_violation"),
+            )
+        # After rollback, the recovery path does another flush for the draft update
+        recovery_flush_called = True
+        return await original_session_flush(*args, **kwargs)
+
+    original_session_get = session.get
+
+    async def patched_get(model, pk, *args, **kwargs):
+        nonlocal recovery_get_called
+        if model is EmailDraftState and pk == draft_id:
+            recovery_get_called = True
+        return await original_session_get(model, pk, *args, **kwargs)
+
+    with (
+        patch(_PATCH_CREDS),
+        patch(_PATCH_API, new_callable=AsyncMock, return_value=mock_gmail_result),
+    ):
+        session.flush = patched_flush
+        session.get = patched_get
+        try:
+            result = await send_approved_reply(
+                user=user, draft_id=draft_id, session=session
+            )
+        finally:
+            session.flush = original_session_flush
+            session.get = original_session_get
+
+    assert result["status"] == "already_sent"
+    # Verify the recovery path attempted to re-fetch and update the draft
+    assert recovery_get_called, (
+        "Recovery path did not call session.get(EmailDraftState, draft_id) "
+        "after IntegrityError rollback"
+    )

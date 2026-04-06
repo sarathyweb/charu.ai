@@ -308,9 +308,22 @@ async def _run_due_row_dispatcher() -> dict[str, int]:
     # Step 2: Claim each row individually and dispatch.
     # Each claim uses its own session/transaction so a failure on one
     # row doesn't roll back claims on others.
-    for call_log_id, version in due_rows:
+    for call_log_id in [row_id for row_id, _ in due_rows]:
         try:
+            # Read fresh version inside the claim transaction to avoid
+            # stale-version ABA issues from the bulk SELECT.
+            claimed_version: int | None = None
             async with async_session_factory() as session:
+                fresh = await session.get(CallLog, call_log_id)
+                if (
+                    fresh is None
+                    or fresh.status != CallLogStatus.SCHEDULED.value
+                ):
+                    skipped += 1
+                    continue
+
+                version = fresh.version
+
                 # Atomic claim: UPDATE … WHERE status='scheduled' AND version=?
                 stmt = (
                     sa_update(CallLog)
@@ -332,6 +345,7 @@ async def _run_due_row_dispatcher() -> dict[str, int]:
                     continue
 
                 await session.commit()
+                claimed_version = version
 
             # Step 3: Dispatch trigger_call_task outside the DB transaction.
             try:
@@ -347,22 +361,31 @@ async def _run_due_row_dispatcher() -> dict[str, int]:
                     "call_log_id=%d, reverting to scheduled",
                     call_log_id,
                 )
-                async with async_session_factory() as session:
-                    revert_stmt = (
-                        sa_update(CallLog)
-                        .where(
-                            CallLog.id == call_log_id,
-                            CallLog.status == CallLogStatus.DISPATCHING.value,
-                            CallLog.version == version + 1,
+                try:
+                    async with async_session_factory() as session:
+                        revert_stmt = (
+                            sa_update(CallLog)
+                            .where(
+                                CallLog.id == call_log_id,
+                                CallLog.status == CallLogStatus.DISPATCHING.value,
+                                CallLog.version == claimed_version + 1,
+                            )
+                            .values(
+                                status=CallLogStatus.SCHEDULED.value,
+                                version=claimed_version + 2,
+                                updated_at=datetime.now(timezone.utc),
+                            )
                         )
-                        .values(
-                            status=CallLogStatus.SCHEDULED.value,
-                            version=version + 2,
-                            updated_at=datetime.now(timezone.utc),
-                        )
+                        await session.exec(revert_stmt)  # type: ignore[call-overload]
+                        await session.commit()
+                except Exception:
+                    logger.critical(
+                        "due_row_dispatcher: REVERT FAILED for call_log_id=%d — "
+                        "row is stuck in 'dispatching' and requires manual "
+                        "intervention or the stale-dispatching sweep to recover it.",
+                        call_log_id,
+                        exc_info=True,
                     )
-                    await session.exec(revert_stmt)  # type: ignore[call-overload]
-                    await session.commit()
                 errors += 1
                 continue
 
@@ -441,6 +464,56 @@ def due_row_dispatcher() -> str:
         f"{result['skipped']} already claimed, "
         f"{result['errors']} errors"
     )
+
+
+# Rows stuck in 'dispatching' longer than this are considered orphaned
+# (broker publish failed and revert also failed, or worker crashed).
+STALE_DISPATCHING_SECONDS = 600  # 10 minutes
+
+
+async def _run_stale_dispatching_sweep() -> int:
+    """Reclaim CallLog rows stuck in 'dispatching' past the TTL.
+
+    These rows result from a broker publish failure where the revert also
+    failed, or from a worker crash between claim and task execution.
+    Reverts them to 'scheduled' so the next dispatcher sweep can retry.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_DISPATCHING_SECONDS)
+    async with async_session_factory() as session:
+        stmt = (
+            sa_update(CallLog)
+            .where(
+                CallLog.status == CallLogStatus.DISPATCHING.value,
+                CallLog.updated_at < cutoff,
+            )
+            .values(
+                status=CallLogStatus.SCHEDULED.value,
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(CallLog.id)
+        )
+        result = await session.exec(stmt)  # type: ignore[call-overload]
+        reclaimed_ids = [row[0] for row in result.all()]
+        await session.commit()
+
+    if reclaimed_ids:
+        logger.warning(
+            "stale_dispatching_sweep: reclaimed %d stuck rows: %s",
+            len(reclaimed_ids),
+            reclaimed_ids,
+        )
+    return len(reclaimed_ids)
+
+
+@celery_app.task(name="app.tasks.calls.stale_dispatching_sweep")
+def stale_dispatching_sweep() -> str:
+    """Reclaim CallLog rows stuck in 'dispatching' for over 10 minutes.
+
+    Safety net for the rare case where both the broker publish and the
+    revert fail, or a worker crashes mid-dispatch.  Runs every 5 minutes.
+    """
+    count = asyncio.run(_run_stale_dispatching_sweep())
+    return f"stale_dispatching_sweep: reclaimed {count} rows"
 
 
 # ---------------------------------------------------------------------------
@@ -530,13 +603,17 @@ async def _run_trigger_call(call_log_id: int) -> dict[str, str]:
     # Append token as query parameter for WebSocket auth
     stream_url_with_token = f"{stream_url}?token={stream_token}"
 
+    # Build TwiML with proper XML escaping to prevent rejection if any
+    # interpolated value contains &, <, ", etc.
+    from xml.sax.saxutils import escape, quoteattr
+
     twiml = (
         "<Response>"
         "  <Connect>"
-        f'    <Stream url="{stream_url_with_token}">'
-        f'      <Parameter name="call_log_id" value="{call_log_id}" />'
-        f'      <Parameter name="user_id" value="{user_id}" />'
-        f'      <Parameter name="call_type" value="{call_type}" />'
+        f'    <Stream url={quoteattr(stream_url_with_token)}>'
+        f'      <Parameter name="call_log_id" value={quoteattr(str(call_log_id))} />'
+        f'      <Parameter name="user_id" value={quoteattr(str(user_id))} />'
+        f'      <Parameter name="call_type" value={quoteattr(str(call_type))} />'
         "    </Stream>"
         "  </Connect>"
         "</Response>"

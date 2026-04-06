@@ -76,7 +76,7 @@ class CallLog(TimestampMixin, SQLModel, table=True):
     scheduled_time: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
-    scheduled_timezone: str  # snapshot of User.timezone at materialization
+    scheduled_timezone: str = Field(sa_column_kwargs={"nullable": False})  # snapshot of User.timezone at materialization
     actual_start_time: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True),
         default=None,
