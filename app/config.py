@@ -24,8 +24,26 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: str
     TWILIO_WHATSAPP_NUMBER: str
 
+    # Twilio voice number for outbound calls (E.164 format)
+    TWILIO_VOICE_NUMBER: str = ""
+
+    # Google OAuth 2.0 client credentials
+    GOOGLE_OAUTH_CLIENT_ID: str = ""
+    GOOGLE_OAUTH_CLIENT_SECRET: str = ""
+    GOOGLE_OAUTH_REDIRECT_URI: str = ""
+
+    # Fernet key for encrypting OAuth tokens at rest.
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    OAUTH_TOKEN_ENCRYPTION_KEY: str = ""
+
+    # HMAC secret for signing WebSocket stream tokens
+    STREAM_TOKEN_SECRET: str = "change-me-in-production"
+
     # Base URL for Twilio webhook signature validation (proxy-safe)
     WEBHOOK_BASE_URL: str
+
+    # Redis URL for Celery broker and RedBeat scheduler
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # Comma-separated allowed CORS origins (e.g. "https://app.example.com,http://localhost:3000")
     CORS_ORIGINS: str
