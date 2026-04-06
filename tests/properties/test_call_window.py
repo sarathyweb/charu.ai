@@ -72,6 +72,7 @@ e164_phones = st.builds(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _run_async(coro):
     """Run an async coroutine in a new event loop (safe for Hypothesis)."""
     loop = asyncio.new_event_loop()
@@ -273,8 +274,7 @@ def test_call_window_save_idempotent(phone, wtype, start_hm, gap, tz):
                 duplicate_rejected = True
 
             assert duplicate_rejected, (
-                f"Expected UNIQUE violation for user_id={user_id}, "
-                f"window_type={wtype}"
+                f"Expected UNIQUE violation for user_id={user_id}, window_type={wtype}"
             )
 
             # Verify exactly one record
@@ -285,9 +285,7 @@ def test_call_window_save_idempotent(phone, wtype, start_hm, gap, tz):
                 )
             )
             windows = result.all()
-            assert len(windows) == 1, (
-                f"Expected 1 window, got {len(windows)}"
-            )
+            assert len(windows) == 1, f"Expected 1 window, got {len(windows)}"
             assert windows[0].start_time == start
             assert windows[0].end_time == end
 
@@ -354,7 +352,11 @@ def test_different_window_types_coexist(phone, start_hm, gap, tz):
             now = datetime.now(timezone.utc)
 
             # Insert all three window types
-            for wt in [WindowType.MORNING.value, WindowType.AFTERNOON.value, WindowType.EVENING.value]:
+            for wt in [
+                WindowType.MORNING.value,
+                WindowType.AFTERNOON.value,
+                WindowType.EVENING.value,
+            ]:
                 cw = CallWindow(
                     user_id=user_id,
                     window_type=wt,

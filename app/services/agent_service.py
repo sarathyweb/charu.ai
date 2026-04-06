@@ -1,9 +1,11 @@
 """AgentService — ADK Runner wrapper with session resolution."""
 
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
+from google.adk.events import Event, EventActions
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from google.genai.types import Content, Part
@@ -13,6 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.current_session import CurrentSession
 from app.models.schemas import AgentRunResult
+from app.services.user_service import hydrate_session_state
 from app.utils import normalize_phone
 
 logger = logging.getLogger(__name__)
@@ -33,9 +36,7 @@ class AgentService:
         self.session_service = session_service
         self.session = session
 
-    async def run(
-        self, user_id: str, message: str, channel: str
-    ) -> AgentRunResult:
+    async def run(self, user_id: str, message: str, channel: str) -> AgentRunResult:
         """Route a user message through the ADK agent and return the reply.
 
         Args:
@@ -111,6 +112,11 @@ class AgentService:
                 session_id=mapping.session_id,
             )
             if adk_session is not None:
+                # Re-hydrate: compute fresh state from DB and patch any
+                # changes into the live session via append_event so that
+                # preference edits (name, timezone, etc.) are visible
+                # immediately without requiring a new session.
+                await self._sync_state_from_db(phone, adk_session)
                 return mapping.session_id
 
             # Stale mapping — ADK session was deleted; remove and recreate
@@ -122,13 +128,14 @@ class AgentService:
             await self.session.delete(mapping)
             await self.session.commit()
 
-        # 2. No mapping — create a new ADK session
+        # 2. No mapping — create a new ADK session with hydrated state
+        state = await hydrate_session_state(phone, self.session)
         new_session_id = str(uuid.uuid4())
         adk_session = await self.session_service.create_session(
             app_name=APP_NAME,
             user_id=phone,
             session_id=new_session_id,
-            state={"phone": phone},
+            state=state,
         )
         session_id = adk_session.id
 
@@ -166,3 +173,48 @@ class AgentService:
                 )
 
             return existing.session_id if existing else session_id
+
+    async def _sync_state_from_db(self, phone: str, adk_session: object) -> None:
+        """Re-hydrate ADK session state from DB, patching any drift.
+
+        Computes the canonical ``user:``-prefixed state from the database
+        and compares it to the live session state.  If any keys differ,
+        an ``Event`` with a ``state_delta`` is appended so the change is
+        tracked and persisted by the ``DatabaseSessionService``.
+
+        This ensures that preference edits made outside the agent (e.g.
+        via ``update_preferences``) are reflected in the next agent run
+        without requiring a brand-new session.
+        """
+        fresh = await hydrate_session_state(phone, self.session)
+        current = adk_session.state or {}
+
+        # Compute delta: only keys whose values actually changed
+        delta: dict[str, object] = {}
+        for key, value in fresh.items():
+            if current.get(key) != value:
+                delta[key] = value
+
+        # Also detect keys that were removed (e.g. name set to None)
+        # We represent removal by setting the key to None in the delta.
+        for key in current:
+            if key.startswith("user:") and key not in fresh:
+                delta[key] = None
+
+        if not delta:
+            return  # Nothing changed — skip the append
+
+        logger.debug(
+            "Syncing %d state key(s) from DB for %s: %s",
+            len(delta),
+            phone,
+            list(delta.keys()),
+        )
+
+        sync_event = Event(
+            invocation_id=f"state_sync_{uuid.uuid4().hex[:8]}",
+            author="system",
+            actions=EventActions(state_delta=delta),
+            timestamp=time.time(),
+        )
+        await self.session_service.append_event(adk_session, sync_event)

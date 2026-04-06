@@ -25,6 +25,4 @@ def normalize_phone(raw: str, default_region: str | None = None) -> str:
     if not phonenumbers.is_valid_number(parsed):
         raise ValueError(f"Invalid phone number: {raw}")
 
-    return phonenumbers.format_number(
-        parsed, phonenumbers.PhoneNumberFormat.E164
-    )
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)

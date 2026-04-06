@@ -119,6 +119,7 @@ class TestRouterWiring:
             # Re-import to get the real app with patched settings
             import importlib
             import app.main as main_mod
+
             importlib.reload(main_mod)
             real_app = main_mod.app
 
@@ -342,9 +343,7 @@ class TestChatFlowIntegration:
         """No Authorization header → 401 before any service is called."""
         app, mocks = _build_app_with_overrides(firebase_principal=None)
 
-        with patch(
-            "app.auth.firebase._ensure_firebase_initialized", return_value=None
-        ):
+        with patch("app.auth.firebase._ensure_firebase_initialized", return_value=None):
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://test"

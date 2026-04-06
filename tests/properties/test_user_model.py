@@ -45,7 +45,9 @@ e164_phones = st.builds(
 optional_names = st.one_of(
     st.none(),
     st.text(
-        alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters="\x00"),
+        alphabet=st.characters(
+            blacklist_categories=("Cs",), blacklist_characters="\x00"
+        ),
         min_size=1,
         max_size=50,
     ).filter(lambda s: s.strip()),
@@ -61,6 +63,7 @@ optional_firebase_uids = st.one_of(
 # Helper: run async DB operation in a fresh loop per Hypothesis example
 # ---------------------------------------------------------------------------
 
+
 def _run_async(coro):
     """Run an async coroutine in a new event loop (safe for Hypothesis @given)."""
     loop = asyncio.new_event_loop()
@@ -73,6 +76,7 @@ def _run_async(coro):
 async def _make_session():
     """Create engine, ensure tables exist, return (engine, session)."""
     import app.models  # noqa: F401
+
     eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with eng.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
@@ -96,7 +100,9 @@ def test_user_round_trip(phone, name, firebase_uid):
         eng, session = await _make_session()
         try:
             # Clean slate
-            await session.exec(sa_text("DELETE FROM users WHERE phone = :p"), params={"p": phone})
+            await session.exec(
+                sa_text("DELETE FROM users WHERE phone = :p"), params={"p": phone}
+            )
             if firebase_uid is not None:
                 await session.exec(
                     sa_text("DELETE FROM users WHERE firebase_uid = :u"),
@@ -125,7 +131,9 @@ def test_user_round_trip(phone, name, firebase_uid):
             assert fetched.last_login_at is not None
 
             # Clean up
-            await session.exec(sa_text("DELETE FROM users WHERE phone = :p"), params={"p": phone})
+            await session.exec(
+                sa_text("DELETE FROM users WHERE phone = :p"), params={"p": phone}
+            )
             await session.commit()
         finally:
             await session.close()
@@ -145,7 +153,9 @@ def test_phone_uniqueness(phone):
     async def _test():
         eng, session = await _make_session()
         try:
-            await session.exec(sa_text("DELETE FROM users WHERE phone = :p"), params={"p": phone})
+            await session.exec(
+                sa_text("DELETE FROM users WHERE phone = :p"), params={"p": phone}
+            )
             await session.commit()
 
             user1 = User(phone=phone)
@@ -167,7 +177,9 @@ def test_phone_uniqueness(phone):
             users = result.all()
             assert len(users) == 1, f"Expected 1 user, got {len(users)}"
 
-            await session.exec(sa_text("DELETE FROM users WHERE phone = :p"), params={"p": phone})
+            await session.exec(
+                sa_text("DELETE FROM users WHERE phone = :p"), params={"p": phone}
+            )
             await session.commit()
         finally:
             await session.close()

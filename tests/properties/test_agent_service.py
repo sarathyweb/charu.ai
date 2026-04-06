@@ -50,16 +50,18 @@ TEST_DATABASE_URL = os.getenv(
 # Hypothesis strategies
 # ---------------------------------------------------------------------------
 
-_e164_phone = st.sampled_from([
-    "+14155552671",
-    "+447911123456",
-    "+971501234567",
-    "+919876543210",
-    "+61412345678",
-    "+4915112345678",
-    "+33612345678",
-    "+818012345678",
-])
+_e164_phone = st.sampled_from(
+    [
+        "+14155552671",
+        "+447911123456",
+        "+971501234567",
+        "+919876543210",
+        "+61412345678",
+        "+4915112345678",
+        "+33612345678",
+        "+818012345678",
+    ]
+)
 
 _channel = st.sampled_from(["web", "whatsapp"])
 
@@ -120,11 +122,11 @@ def _make_mock_runner():
     return runner
 
 
-
 # ---------------------------------------------------------------------------
 # P6: Session user_id is phone number
 # **Validates: Requirements 5.2**
 # ---------------------------------------------------------------------------
+
 
 @given(phone=_e164_phone, channel=_channel)
 @settings(max_examples=20, suppress_health_check=[HealthCheck.too_slow])
@@ -141,7 +143,9 @@ def test_session_user_id_is_e164_phone(phone, channel):
             agent_svc = AgentService(runner, adk_svc, db_session)
 
             result = await agent_svc.run(
-                user_id=phone, message="hello", channel=channel,
+                user_id=phone,
+                message="hello",
+                channel=channel,
             )
 
             # The session should exist in ADK with user_id == phone
@@ -150,9 +154,7 @@ def test_session_user_id_is_e164_phone(phone, channel):
                 user_id=phone,
                 session_id=result.session_id,
             )
-            assert adk_session is not None, (
-                f"ADK session {result.session_id} not found"
-            )
+            assert adk_session is not None, f"ADK session {result.session_id} not found"
             assert adk_session.user_id == phone
             assert E164_PATTERN.match(adk_session.user_id), (
                 f"user_id '{adk_session.user_id}' is not valid E.164"
@@ -177,6 +179,7 @@ def test_session_user_id_is_e164_phone(phone, channel):
 # **Validates: Requirements 5.3**
 # ---------------------------------------------------------------------------
 
+
 @given(phone=_e164_phone)
 @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow])
 def test_cross_channel_session_continuity(phone):
@@ -193,12 +196,16 @@ def test_cross_channel_session_continuity(phone):
 
             # First message via web channel
             result_web = await agent_svc.run(
-                user_id=phone, message="hello from web", channel="web",
+                user_id=phone,
+                message="hello from web",
+                channel="web",
             )
 
             # Second message via whatsapp channel
             result_wa = await agent_svc.run(
-                user_id=phone, message="hello from whatsapp", channel="whatsapp",
+                user_id=phone,
+                message="hello from whatsapp",
+                channel="whatsapp",
             )
 
             # Both should resolve to the same session
@@ -226,6 +233,7 @@ def test_cross_channel_session_continuity(phone):
 # **Validates: Requirements 5.4**
 # ---------------------------------------------------------------------------
 
+
 @given(phone=_e164_phone)
 @settings(max_examples=10, suppress_health_check=[HealthCheck.too_slow])
 def test_session_persistence_across_restarts(phone):
@@ -242,7 +250,9 @@ def test_session_persistence_across_restarts(phone):
 
             # Create a session via AgentService
             result = await agent_svc.run(
-                user_id=phone, message="remember this", channel="web",
+                user_id=phone,
+                message="remember this",
+                channel="web",
             )
             session_id = result.session_id
 

@@ -1,0 +1,22 @@
+target-version = "py311"
+line-length = 88
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",    # line too long — let formatter handle it
+    "B008",    # function call in default arg — FastAPI Depends() pattern
+    "B904",    # raise from in except — FastAPI HTTPException pattern
+    "E402",    # module-level import not at top — load_dotenv() must run first
+    "RUF002",  # ambiguous unicode in docstrings — intentional math notation
+    "RUF012",  # mutable class default — SQLModel uses Field(default=...)
+    "UP017",   # datetime.UTC alias — codebase uses timezone.utc consistently
+    "SIM102",  # nested if — readability preference, not always better combined
+    "UP042",   # StrEnum — codebase uses str+Enum for Python 3.11 compat
+]
+
+[lint.per-file-ignores]
+"app/services/call_window_service.py" = ["F821"]  # string annotations for `time`
+
+[lint.isort]
+known-first-party = ["app"]

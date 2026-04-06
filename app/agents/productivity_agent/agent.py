@@ -9,6 +9,14 @@ from google.adk.agents import Agent
 from google.adk.tools import google_search
 from google.genai import types
 
+from .tools import complete_task_by_title, list_pending_tasks, save_task
+
+# ---------------------------------------------------------------------------
+# Task management tools — thin wrappers around TaskService, auto-wrapped
+# as FunctionTool by ADK when added to the tools list.
+# ---------------------------------------------------------------------------
+_task_tools = [save_task, complete_task_by_title, list_pending_tasks]
+
 # ---------------------------------------------------------------------------
 # Shared generation config — cap output to ~400 tokens so replies stay
 # within Twilio's 1600-character WhatsApp limit (~4 chars/token for English).
@@ -25,8 +33,7 @@ task_manager_agent = Agent(
     name="task_manager",
     model="gemini-3-flash-preview",
     description=(
-        "Handles task management: creating, listing, updating, "
-        "and completing tasks."
+        "Handles task management: creating, listing, updating, and completing tasks."
     ),
     instruction=(
         "You are a task management specialist. Help users create, "
@@ -34,6 +41,7 @@ task_manager_agent = Agent(
         "list, update, or complete a task, handle it directly. "
         "Keep responses concise."
     ),
+    tools=_task_tools,
     generate_content_config=_generation_config,
 )
 
@@ -54,10 +62,11 @@ root_agent = Agent(
         "If Google Search fails or is unavailable, let the user know "
         "that live search is temporarily unavailable and answer from "
         "your existing knowledge if possible.\n\n"
-        "Delegate task management requests (creating, listing, updating, "
-        "completing tasks) to the task_manager agent."
+        "For task management requests (creating, listing, updating, "
+        "completing tasks), you can handle them directly using the "
+        "task tools or delegate to the task_manager agent."
     ),
     sub_agents=[task_manager_agent],
-    tools=[google_search],
+    tools=[google_search] + _task_tools,
     generate_content_config=_generation_config,
 )

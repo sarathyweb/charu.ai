@@ -102,9 +102,7 @@ class TestAuthSyncEndpoint:
         _override_firebase_valid(app)
 
         mock_user_svc = AsyncMock()
-        mock_user_svc.ensure_from_firebase = AsyncMock(
-            return_value=(MagicMock(), True)
-        )
+        mock_user_svc.ensure_from_firebase = AsyncMock(return_value=(MagicMock(), True))
         mock_session = AsyncMock()
         app.dependency_overrides[get_user_service] = lambda: mock_user_svc
         app.dependency_overrides[get_db_session] = lambda: mock_session
@@ -153,9 +151,7 @@ class TestAuthSyncEndpoint:
         app = _make_test_app()
         _override_services(app)
 
-        with patch(
-            "app.auth.firebase._ensure_firebase_initialized", return_value=None
-        ):
+        with patch("app.auth.firebase._ensure_firebase_initialized", return_value=None):
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://test"
@@ -201,9 +197,7 @@ class TestChatEndpoint:
         _override_services(app)
 
         # Patch _ensure_firebase_initialized to avoid needing real credentials
-        with patch(
-            "app.auth.firebase._ensure_firebase_initialized", return_value=None
-        ):
+        with patch("app.auth.firebase._ensure_firebase_initialized", return_value=None):
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://test"
@@ -384,7 +378,4 @@ class TestLifespan:
                 assert hasattr(real_app.state, "runner")
                 assert hasattr(real_app.state, "session_service")
                 assert real_app.state.runner is mock_runner_cls.return_value
-                assert (
-                    real_app.state.session_service
-                    is mock_dss_cls.return_value
-                )
+                assert real_app.state.session_service is mock_dss_cls.return_value

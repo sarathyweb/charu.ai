@@ -1,10 +1,11 @@
 """Firebase JWT verification dependency — verify_id_token and FirebasePrincipal."""
 
 import firebase_admin
-from firebase_admin import auth as firebase_auth, credentials
 from fastapi import Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from firebase_admin import auth as firebase_auth
+from firebase_admin import credentials
 
 from app.models.schemas import FirebasePrincipal
 from app.utils import normalize_phone

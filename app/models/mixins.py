@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, func
+from sqlalchemy import DateTime, func
 from sqlmodel import Field, SQLModel
 
 

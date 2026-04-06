@@ -5,7 +5,7 @@ by property tests (task 1.10).  No DB access — validation only.
 """
 
 from datetime import time
-from zoneinfo import ZoneInfo, available_timezones
+from zoneinfo import available_timezones
 
 # Minimum window width in minutes (Requirement 2.V2).
 MIN_WINDOW_WIDTH_MINUTES = 20
@@ -27,7 +27,10 @@ def validate_call_window(
     """
     # 1. IANA timezone check
     if timezone not in available_timezones():
-        return False, f"Invalid timezone: {timezone}. Use an IANA identifier like America/New_York."
+        return (
+            False,
+            f"Invalid timezone: {timezone}. Use an IANA identifier like America/New_York.",
+        )
 
     # 2. Cross-midnight / start >= end
     start_minutes = start_time.hour * 60 + start_time.minute

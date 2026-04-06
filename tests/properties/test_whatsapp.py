@@ -34,16 +34,18 @@ from app.utils import normalize_phone
 # Hypothesis strategies
 # ---------------------------------------------------------------------------
 
-_e164_phone = st.sampled_from([
-    "+14155552671",
-    "+447911123456",
-    "+971501234567",
-    "+919876543210",
-    "+61412345678",
-    "+4915112345678",
-    "+33612345678",
-    "+818012345678",
-])
+_e164_phone = st.sampled_from(
+    [
+        "+14155552671",
+        "+447911123456",
+        "+971501234567",
+        "+919876543210",
+        "+61412345678",
+        "+4915112345678",
+        "+33612345678",
+        "+818012345678",
+    ]
+)
 
 # Message bodies: printable text, 1–300 chars
 _message_body = st.text(
@@ -65,6 +67,7 @@ _any_text = st.text(
 # **Validates: Requirements 7.3, 7.4**
 # ---------------------------------------------------------------------------
 
+
 @given(phone=_e164_phone, body=_message_body)
 @settings(max_examples=50, suppress_health_check=[HealthCheck.too_slow])
 def test_whatsapp_phone_extraction_and_routing(phone, body):
@@ -79,20 +82,18 @@ def test_whatsapp_phone_extraction_and_routing(phone, body):
 
     # The extracted phone must equal the original E.164 phone
     assert normalised == phone, (
-        f"Expected user_id '{phone}', got '{normalised}' "
-        f"from From='{raw_from}'"
+        f"Expected user_id '{phone}', got '{normalised}' from From='{raw_from}'"
     )
 
     # The normalised phone starts with '+' (E.164)
-    assert normalised.startswith("+"), (
-        f"user_id '{normalised}' is not E.164"
-    )
+    assert normalised.startswith("+"), f"user_id '{normalised}' is not E.164"
 
 
 # ---------------------------------------------------------------------------
 # P11: WhatsApp reply to correct sender
 # **Validates: Requirements 7.5**
 # ---------------------------------------------------------------------------
+
 
 @given(phone=_e164_phone, reply_text=_message_body)
 @settings(max_examples=50, suppress_health_check=[HealthCheck.too_slow])
@@ -135,6 +136,7 @@ def test_whatsapp_reply_to_correct_sender(phone, reply_text):
 # P12: WhatsApp message truncation
 # **Validates: Requirements 7.6**
 # ---------------------------------------------------------------------------
+
 
 @given(text=_any_text)
 @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])

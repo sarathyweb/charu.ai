@@ -13,6 +13,16 @@ from app.utils import normalize_phone
 
 logger = logging.getLogger(__name__)
 
+# Fields that update_preferences is allowed to modify.
+# Sensitive fields (OAuth tokens, firebase_uid) are excluded.
+_ALLOWED_PREFERENCE_FIELDS: frozenset[str] = frozenset(
+    {
+        "name",
+        "timezone",
+        "onboarding_complete",
+    }
+)
+
 
 class UserService:
     """Handles user lookup, creation, and cross-channel identity linking."""
@@ -136,6 +146,86 @@ class UserService:
             detail="Phone linked to different account",
         )
 
+    async def get_or_create_by_phone(self, phone: str) -> User:
+        """Get-or-create a user by phone number.
+
+        Simple variant without channel-specific logic — used by tools and
+        services that just need a user record to exist.
+
+        Uses IntegrityError handling for race-condition safety.
+        """
+        phone = normalize_phone(phone)
+
+        user = await self.get_by_phone(phone)
+        if user is not None:
+            return user
+
+        user = User(phone=phone)
+        self.session.add(user)
+        try:
+            await self.session.commit()
+            await self.session.refresh(user)
+            return user
+        except IntegrityError:
+            await self.session.rollback()
+            user = await self.get_by_phone(phone)
+            if user is None:
+                raise  # pragma: no cover — unexpected
+            return user
+
+    async def update_preferences(self, phone: str, **kwargs: object) -> User:
+        """Partial update of user preferences (write-through pattern).
+
+        Only fields listed in ``_ALLOWED_PREFERENCE_FIELDS`` may be updated.
+        Sensitive fields (OAuth tokens, firebase_uid) are rejected.
+
+        The method is idempotent — setting a field to its current value is a
+        no-op (no DB write).
+
+        Returns:
+            The (possibly updated) ``User`` object.
+
+        Raises:
+            ValueError: If *phone* does not match an existing user or if an
+                invalid field name is supplied.
+        """
+        phone = normalize_phone(phone)
+
+        invalid = set(kwargs) - _ALLOWED_PREFERENCE_FIELDS
+        if invalid:
+            raise ValueError(
+                f"Cannot update restricted/unknown fields: {', '.join(sorted(invalid))}"
+            )
+
+        # Validate timezone if provided
+        if "timezone" in kwargs and kwargs["timezone"] is not None:
+            from zoneinfo import available_timezones
+
+            tz_value = kwargs["timezone"]
+            if tz_value not in available_timezones():
+                raise ValueError(
+                    f"Invalid timezone: {tz_value!r}. "
+                    "Use an IANA identifier like America/New_York."
+                )
+
+        user = await self.get_by_phone(phone)
+        if user is None:
+            raise ValueError(f"No user found for phone {phone}")
+
+        # Only write if at least one value actually changed.
+        changed = False
+        for field, value in kwargs.items():
+            if getattr(user, field) != value:
+                setattr(user, field, value)
+                changed = True
+
+        if changed:
+            self.session.add(user)
+            await self.session.commit()
+            await self.session.refresh(user)
+
+        return user
+
     async def ensure_from_whatsapp(self, phone: str) -> User:
         """Get-or-create a user from an inbound WhatsApp message.
 
@@ -163,3 +253,57 @@ class UserService:
             if user is None:
                 raise  # pragma: no cover — unexpected
             return user
+
+
+# ---------------------------------------------------------------------------
+# Session hydration helper
+# ---------------------------------------------------------------------------
+
+
+async def hydrate_session_state(
+    phone: str,
+    session: AsyncSession,
+) -> dict[str, object]:
+    """Build a ``user:``-prefixed state dict from the DB for *phone*.
+
+    Used when creating a new ADK session so that the agent has immediate
+    access to all persisted user preferences.  Call-window times are
+    included when the ``call_windows`` table has rows for the user.
+
+    Returns a dict suitable for merging into the ADK session ``state``.
+    The ``phone`` key (unprefixed) is always included.
+    """
+    from app.models.call_window import CallWindow  # local import to avoid circular
+
+    svc = UserService(session)
+    user = await svc.get_by_phone(phone)
+
+    state: dict[str, object] = {"phone": phone}
+    if user is None:
+        return state
+
+    # Core preferences
+    if user.name:
+        state["user:name"] = user.name
+    if user.timezone:
+        state["user:timezone"] = user.timezone
+    state["user:onboarding_complete"] = user.onboarding_complete
+
+    # Google connection flags — derived from granted scopes
+    scopes = (user.google_granted_scopes or "").split()
+    state["user:google_calendar_connected"] = any("calendar" in s for s in scopes)
+    state["user:gmail_connected"] = any("gmail.modify" in s for s in scopes)
+
+    # Call windows
+    result = await session.exec(
+        select(CallWindow).where(
+            CallWindow.user_id == user.id,
+            CallWindow.is_active == True,  # noqa: E712
+        )
+    )
+    for window in result.all():
+        wt = window.window_type  # e.g. "morning"
+        state[f"user:{wt}_call_start"] = window.start_time.strftime("%H:%M")
+        state[f"user:{wt}_call_end"] = window.end_time.strftime("%H:%M")
+
+    return state

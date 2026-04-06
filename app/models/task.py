@@ -8,7 +8,6 @@ from sqlmodel import Field, SQLModel
 from app.models.enums import TaskSource, TaskStatus
 from app.models.mixins import TimestampMixin
 
-
 # Build CHECK constraint value lists from enums at import time.
 _STATUS_VALUES = ", ".join(f"'{e.value}'" for e in TaskStatus)
 _SOURCE_VALUES = ", ".join(f"'{e.value}'" for e in TaskSource)

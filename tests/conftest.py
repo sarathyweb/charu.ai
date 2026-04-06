@@ -4,6 +4,7 @@ import os
 
 import pytest
 import pytest_asyncio
+import sqlalchemy
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlmodel import SQLModel
@@ -29,6 +30,8 @@ async def db_engine():
 
     eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with eng.begin() as conn:
+        # Ensure pg_trgm extension is available (required by TaskService)
+        await conn.execute(sqlalchemy.text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(SQLModel.metadata.create_all)
     yield eng
     async with eng.begin() as conn:

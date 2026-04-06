@@ -14,7 +14,6 @@ from app.models.enums import (
 )
 from app.models.mixins import TimestampMixin
 
-
 # Build CHECK constraint value lists from enums at import time.
 _STATUS_VALUES = ", ".join(f"'{e.value}'" for e in CallLogStatus)
 _CALL_TYPE_VALUES = ", ".join(f"'{e.value}'" for e in CallType)
@@ -91,15 +90,9 @@ class CallLog(TimestampMixin, SQLModel, table=True):
     attempt_number: int = Field(default=1)
 
     # ── Lineage ──────────────────────────────────────────────────────────
-    root_call_log_id: int | None = Field(
-        default=None, foreign_key="call_logs.id"
-    )
-    replaced_call_log_id: int | None = Field(
-        default=None, foreign_key="call_logs.id"
-    )
-    origin_window_id: int | None = Field(
-        default=None, foreign_key="call_windows.id"
-    )
+    root_call_log_id: int | None = Field(default=None, foreign_key="call_logs.id")
+    replaced_call_log_id: int | None = Field(default=None, foreign_key="call_logs.id")
+    origin_window_id: int | None = Field(default=None, foreign_key="call_windows.id")
 
     # ── Twilio ───────────────────────────────────────────────────────────
     twilio_call_sid: str | None = Field(default=None, index=True)
@@ -112,7 +105,8 @@ class CallLog(TimestampMixin, SQLModel, table=True):
     goal: str | None = None
     next_action: str | None = None
     commitments: list[str] | None = Field(
-        default=None, sa_column=Column(JSONB, nullable=True),
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
     )
     call_outcome_confidence: str | None = None
 

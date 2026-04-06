@@ -44,16 +44,18 @@ TEST_DATABASE_URL = os.getenv(
 # ---------------------------------------------------------------------------
 
 # Valid E.164 phones that phonenumbers will accept
-_e164_phone = st.sampled_from([
-    "+14155552671",
-    "+447911123456",
-    "+971501234567",
-    "+919876543210",
-    "+61412345678",
-    "+4915112345678",
-    "+33612345678",
-    "+818012345678",
-])
+_e164_phone = st.sampled_from(
+    [
+        "+14155552671",
+        "+447911123456",
+        "+971501234567",
+        "+919876543210",
+        "+61412345678",
+        "+4915112345678",
+        "+33612345678",
+        "+818012345678",
+    ]
+)
 
 _firebase_uid = st.text(
     alphabet=string.ascii_letters + string.digits,
@@ -65,6 +67,7 @@ _firebase_uid = st.text(
 # ---------------------------------------------------------------------------
 # Helper: run async DB operation in a fresh loop per Hypothesis example
 # ---------------------------------------------------------------------------
+
 
 def _run_async(coro):
     """Run an async coroutine in a new event loop (safe for Hypothesis @given)."""
@@ -78,6 +81,7 @@ def _run_async(coro):
 async def _make_session():
     """Create engine, ensure tables exist, return (engine, session)."""
     import app.models  # noqa: F401 — register all table classes
+
     eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with eng.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
@@ -102,6 +106,7 @@ async def _cleanup(session, phone: str, firebase_uid: str | None = None):
 # P3: User creation by channel
 # **Validates: Requirements 2.4, 2.6**
 # ---------------------------------------------------------------------------
+
 
 @given(phone=_e164_phone, uid=_firebase_uid)
 @settings(max_examples=20, suppress_health_check=[HealthCheck.too_slow])
@@ -158,6 +163,7 @@ def test_whatsapp_creates_user_without_firebase_uid(phone):
 # **Validates: Requirements 2.7**
 # ---------------------------------------------------------------------------
 
+
 @given(phone=_e164_phone, uid=_firebase_uid)
 @settings(max_examples=20, suppress_health_check=[HealthCheck.too_slow])
 def test_cross_channel_identity_linking(phone, uid):
@@ -179,9 +185,7 @@ def test_cross_channel_identity_linking(phone, uid):
             assert web_user.phone == phone
 
             # Step 3: Verify only one record exists
-            result = await session.exec(
-                select(User).where(User.phone == phone)
-            )
+            result = await session.exec(select(User).where(User.phone == phone))
             users = result.all()
             assert len(users) == 1, (
                 f"Expected 1 user for phone {phone}, got {len(users)}"
@@ -200,6 +204,7 @@ def test_cross_channel_identity_linking(phone, uid):
 # P5: Last login timestamp monotonicity
 # **Validates: Requirements 2.5**
 # ---------------------------------------------------------------------------
+
 
 @given(phone=_e164_phone, uid=_firebase_uid)
 @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow])
@@ -221,17 +226,13 @@ def test_last_login_timestamp_monotonicity(phone, uid):
             user2, _ = await svc.ensure_from_firebase(phone, uid)
             ts2 = user2.last_login_at
             assert ts2 is not None
-            assert ts2 >= ts1, (
-                f"last_login_at went backwards: {ts2} < {ts1}"
-            )
+            assert ts2 >= ts1, f"last_login_at went backwards: {ts2} < {ts1}"
 
             # Third auth — should be >= second
             user3, _ = await svc.ensure_from_firebase(phone, uid)
             ts3 = user3.last_login_at
             assert ts3 is not None
-            assert ts3 >= ts2, (
-                f"last_login_at went backwards: {ts3} < {ts2}"
-            )
+            assert ts3 >= ts2, f"last_login_at went backwards: {ts3} < {ts2}"
 
             await _cleanup(session, phone, uid)
         finally:
@@ -245,6 +246,7 @@ def test_last_login_timestamp_monotonicity(phone, uid):
 # P5a: Firebase UID conflict detection
 # **Validates: Requirements 2.7 (edge case)**
 # ---------------------------------------------------------------------------
+
 
 @given(
     phone=_e164_phone,
@@ -283,9 +285,7 @@ def test_firebase_uid_conflict_detection(phone, uid_a, uid_b):
 
             # Verify original UID is unchanged
             session.expire_all()
-            result = await session.exec(
-                select(User).where(User.phone == phone)
-            )
+            result = await session.exec(select(User).where(User.phone == phone))
             unchanged_user = result.first()
             assert unchanged_user is not None
             assert unchanged_user.firebase_uid == uid_a, (
@@ -305,6 +305,7 @@ def test_firebase_uid_conflict_detection(phone, uid_a, uid_b):
 # **Validates: Requirements 9.7**
 # ---------------------------------------------------------------------------
 
+
 @given(phone=_e164_phone, uid=_firebase_uid)
 @settings(max_examples=20, suppress_health_check=[HealthCheck.too_slow])
 def test_verified_auth_ensures_user_exists(phone, uid):
@@ -321,9 +322,7 @@ def test_verified_auth_ensures_user_exists(phone, uid):
             await svc.ensure_from_firebase(phone, uid)
 
             # Verify user record exists
-            result = await session.exec(
-                select(User).where(User.phone == phone)
-            )
+            result = await session.exec(select(User).where(User.phone == phone))
             user = result.first()
             assert user is not None, (
                 f"No user record found for phone {phone} after auth"

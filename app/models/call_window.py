@@ -8,7 +8,6 @@ from sqlmodel import Field, SQLModel
 from app.models.enums import WindowType
 from app.models.mixins import TimestampMixin
 
-
 # Build the CHECK constraint value list from the enum at import time.
 _WINDOW_TYPE_VALUES = ", ".join(f"'{e.value}'" for e in WindowType)
 

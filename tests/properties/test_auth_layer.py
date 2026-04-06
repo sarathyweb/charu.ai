@@ -56,16 +56,18 @@ _firebase_uid = st.text(
 )
 
 # E.164 phone numbers (valid ones that phonenumbers will accept)
-_e164_phone = st.sampled_from([
-    "+14155552671",
-    "+447911123456",
-    "+971501234567",
-    "+919876543210",
-    "+61412345678",
-    "+4915112345678",
-    "+33612345678",
-    "+818012345678",
-])
+_e164_phone = st.sampled_from(
+    [
+        "+14155552671",
+        "+447911123456",
+        "+971501234567",
+        "+919876543210",
+        "+61412345678",
+        "+4915112345678",
+        "+33612345678",
+        "+818012345678",
+    ]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +98,7 @@ def _make_firebase_app() -> FastAPI:
 
     @app.post("/api/chat")
     async def chat(principal: FirebasePrincipal = Depends(get_firebase_user)):
-        return JSONResponse(
-            {"uid": principal.uid, "phone": principal.phone_number}
-        )
+        return JSONResponse({"uid": principal.uid, "phone": principal.phone_number})
 
     return app
 
@@ -138,7 +138,9 @@ class TestTwilioSignatureValidation:
         with patch("app.auth.twilio.get_settings", return_value=mock_settings):
             app = _make_twilio_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.post(
                     WEBHOOK_PATH,
                     content=body,
@@ -172,7 +174,9 @@ class TestTwilioSignatureValidation:
         with patch("app.auth.twilio.get_settings", return_value=mock_settings):
             app = _make_twilio_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.post(
                     WEBHOOK_PATH,
                     content=body,
@@ -198,7 +202,9 @@ class TestTwilioSignatureValidation:
         with patch("app.auth.twilio.get_settings", return_value=mock_settings):
             app = _make_twilio_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.post(
                     WEBHOOK_PATH,
                     content="Body=hello",
@@ -258,7 +264,9 @@ class TestFirebaseJWTAuthentication:
         ):
             app = _make_firebase_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.post(
                     "/api/chat",
                     headers={"Authorization": "Bearer fake_valid_jwt"},
@@ -294,7 +302,9 @@ class TestFirebaseJWTAuthentication:
         ):
             app = _make_firebase_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.post(
                     "/api/chat",
                     headers={"Authorization": "Bearer fake_jwt_no_phone"},
@@ -312,7 +322,9 @@ class TestFirebaseJWTAuthentication:
         with _patch_firebase():
             app = _make_firebase_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.post("/api/chat")
             assert resp.status_code == 401
 
@@ -335,7 +347,9 @@ class TestFirebaseJWTAuthentication:
         ):
             app = _make_firebase_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 resp = await client.post(
                     "/api/chat",
                     headers={"Authorization": "Bearer expired_jwt"},

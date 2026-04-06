@@ -1,6 +1,6 @@
 """OutboundMessage SQLModel — at-most-once dedup for proactive WhatsApp sends."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import CheckConstraint, Column, DateTime, UniqueConstraint
 from sqlmodel import Field, SQLModel
