@@ -309,7 +309,7 @@ async def hydrate_session_state(
     # Google connection flags — derived from granted scopes
     scopes = (user.google_granted_scopes or "").split()
     state["user:google_calendar_connected"] = any("calendar" in s for s in scopes)
-    state["user:gmail_connected"] = any("gmail.modify" in s for s in scopes)
+    state["user:google_gmail_connected"] = any("gmail.modify" in s for s in scopes)
 
     # Call windows
     result = await session.exec(

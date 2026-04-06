@@ -56,7 +56,12 @@ class AgentService:
             role="user",
         )
 
-        # Stream events from the runner and collect the final response text
+        # Stream events from the runner and collect the final response text.
+        # When multiple agents participate (e.g. root → onboarding), each
+        # emits its own is_final_response() event.  We collect ALL non-empty
+        # text parts so that both the onboarding summary and any follow-up
+        # from the parent agent are included.  Empty/whitespace parts from
+        # skip callbacks and transfer markers are filtered out.
         reply_parts: list[str] = []
         async for event in self.runner.run_async(
             user_id=phone,
@@ -66,7 +71,7 @@ class AgentService:
             if event.is_final_response():
                 if event.content and event.content.parts:
                     for part in event.content.parts:
-                        if part.text:
+                        if part.text and part.text.strip():
                             reply_parts.append(part.text)
 
         # Update the timestamp on the current_sessions mapping

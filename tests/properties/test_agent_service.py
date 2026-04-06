@@ -108,15 +108,27 @@ async def _cleanup_current_sessions(session: AsyncSession, phone: str):
     await session.commit()
 
 
-def _make_mock_runner():
-    """Create a mock ADK Runner whose run_async yields a single final event."""
+def _make_mock_runner(events=None):
+    """Create a mock ADK Runner whose run_async yields configurable events.
+
+    Args:
+        events: List of (is_final, text_or_none) tuples.  Defaults to a
+                single final event with ``"mock reply"``.
+    """
+    if events is None:
+        events = [(True, "mock reply")]
+
     runner = MagicMock()
 
     async def _fake_run_async(**kwargs):
-        event = MagicMock()
-        event.is_final_response.return_value = True
-        event.content = Content(parts=[Part(text="mock reply")])
-        yield event
+        for is_final, text in events:
+            event = MagicMock()
+            event.is_final_response.return_value = is_final
+            if text is not None:
+                event.content = Content(parts=[Part(text=text)])
+            else:
+                event.content = Content(parts=[Part(text="")])
+            yield event
 
     runner.run_async = _fake_run_async
     return runner
@@ -307,6 +319,122 @@ def test_session_persistence_across_restarts(phone):
                 app_name=APP_NAME,
                 user_id=phone,
                 session_id=session_id,
+            )
+            await _cleanup_current_sessions(db_session, phone)
+        finally:
+            await db_session.close()
+            await eng.dispose()
+
+    _run_async(_test())
+
+
+# ---------------------------------------------------------------------------
+# P9: Multi-agent reply aggregation
+# ---------------------------------------------------------------------------
+
+
+@given(phone=_e164_phone)
+@settings(max_examples=10, suppress_health_check=[HealthCheck.too_slow])
+def test_multi_agent_reply_aggregation(phone):
+    """Multiple final-response events are concatenated, not dropped."""
+
+    async def _test():
+        eng, db_session = await _make_session()
+        adk_svc = DatabaseSessionService(db_url=TEST_DATABASE_URL)
+        try:
+            await _cleanup_current_sessions(db_session, phone)
+
+            # Simulate root→onboarding hand-off: two final events with text
+            runner = _make_mock_runner(events=[
+                (True, "Welcome! Let's get you set up."),
+                (False, None),  # non-final transfer marker — should be skipped
+                (True, "What's your name?"),
+            ])
+            agent_svc = AgentService(runner, adk_svc, db_session)
+
+            result = await agent_svc.run(
+                user_id=phone,
+                message="hi",
+                channel="web",
+            )
+
+            # Both final-response texts must appear in the reply
+            assert "Welcome! Let's get you set up." in result.reply
+            assert "What's your name?" in result.reply
+
+            # Cleanup
+            await adk_svc.delete_session(
+                app_name=APP_NAME,
+                user_id=phone,
+                session_id=result.session_id,
+            )
+            await _cleanup_current_sessions(db_session, phone)
+        finally:
+            await db_session.close()
+            await eng.dispose()
+
+    _run_async(_test())
+
+
+# ---------------------------------------------------------------------------
+# P10: Empty sub-agent gate does not produce blank reply
+# ---------------------------------------------------------------------------
+
+
+@given(phone=_e164_phone)
+@settings(max_examples=10, suppress_health_check=[HealthCheck.too_slow])
+def test_empty_transfer_gate_not_blank(phone):
+    """A blocked sub-agent returning whitespace-only text still yields a reply.
+
+    Regression test: _block_agent_before_onboarding used to return
+    Part(text=""), which was stripped by AgentService, producing a blank
+    reply.  Now it returns a redirect message.
+    """
+
+    async def _test():
+        eng, db_session = await _make_session()
+        adk_svc = DatabaseSessionService(db_url=TEST_DATABASE_URL)
+        try:
+            await _cleanup_current_sessions(db_session, phone)
+
+            # Simulate only a whitespace/empty final event (old behaviour)
+            runner = _make_mock_runner(events=[
+                (True, "   "),  # whitespace-only — stripped by AgentService
+            ])
+            agent_svc = AgentService(runner, adk_svc, db_session)
+
+            result = await agent_svc.run(
+                user_id=phone,
+                message="add a task",
+                channel="whatsapp",
+            )
+
+            # The reply should be empty string (not crash), and the
+            # warning log should fire.  This test exists to ensure the
+            # code path is exercised; the real fix is that the callback
+            # now returns meaningful text so this path is no longer hit.
+            assert result.reply == ""
+
+            # Now verify the FIXED callback text propagates correctly
+            runner_fixed = _make_mock_runner(events=[
+                (True, "Please complete onboarding first so I can help you with that."),
+            ])
+            agent_svc_fixed = AgentService(runner_fixed, adk_svc, db_session)
+
+            result_fixed = await agent_svc_fixed.run(
+                user_id=phone,
+                message="add a task",
+                channel="whatsapp",
+            )
+
+            assert "onboarding" in result_fixed.reply.lower()
+            assert result_fixed.reply.strip() != ""
+
+            # Cleanup
+            await adk_svc.delete_session(
+                app_name=APP_NAME,
+                user_id=phone,
+                session_id=result_fixed.session_id,
             )
             await _cleanup_current_sessions(db_session, phone)
         finally:

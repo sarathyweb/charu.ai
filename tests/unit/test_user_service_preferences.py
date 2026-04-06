@@ -211,7 +211,7 @@ class TestHydrateSessionState:
 
         state = await hydrate_session_state("+14155552671", session)
         assert state["user:google_calendar_connected"] is True
-        assert state["user:gmail_connected"] is False
+        assert state["user:google_gmail_connected"] is False
 
     @pytest.mark.asyncio
     async def test_gmail_connected(self, session: AsyncSession, sample_user: User):
@@ -223,7 +223,7 @@ class TestHydrateSessionState:
 
         state = await hydrate_session_state("+14155552671", session)
         assert state["user:google_calendar_connected"] is False
-        assert state["user:gmail_connected"] is True
+        assert state["user:google_gmail_connected"] is True
 
     @pytest.mark.asyncio
     async def test_both_google_services_connected(
@@ -238,7 +238,7 @@ class TestHydrateSessionState:
 
         state = await hydrate_session_state("+14155552671", session)
         assert state["user:google_calendar_connected"] is True
-        assert state["user:gmail_connected"] is True
+        assert state["user:google_gmail_connected"] is True
 
     @pytest.mark.asyncio
     async def test_call_windows_hydrated(
