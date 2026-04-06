@@ -32,3 +32,4 @@ Thumbs.db
 # Other
 secrets/
 docs/
+uv.lock
