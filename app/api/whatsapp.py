@@ -97,7 +97,12 @@ async def whatsapp_webhook(
                 result.session_id,
                 len(result.reply),
             )
-            await wa_service.send_reply(to=phone, body=result.reply)
+            try:
+                await wa_service.send_reply(to=phone, body=result.reply)
+            except Exception:
+                logger.exception(
+                    "Failed to send WhatsApp reply to %s", phone
+                )
         else:
             logger.warning(
                 "Agent returned empty reply for %s (session %s, message: %.100s)",

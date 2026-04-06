@@ -232,15 +232,27 @@ class UserService:
         * New phone → create with phone, firebase_uid=None.
         * Existing phone → return existing (no UID changes from WhatsApp).
 
+        Always updates ``last_user_whatsapp_message_at`` to open/extend
+        the 24-hour customer service window.
+
         Uses IntegrityError handling for race-condition safety.
         """
         phone = normalize_phone(phone)
+        now = datetime.now(timezone.utc)
 
         user = await self.get_by_phone(phone)
         if user is not None:
+            user.last_user_whatsapp_message_at = now
+            self.session.add(user)
+            await self.session.commit()
+            await self.session.refresh(user)
             return user
 
-        user = User(phone=phone, firebase_uid=None)
+        user = User(
+            phone=phone,
+            firebase_uid=None,
+            last_user_whatsapp_message_at=now,
+        )
         self.session.add(user)
         try:
             await self.session.commit()
@@ -252,6 +264,11 @@ class UserService:
             user = await self.get_by_phone(phone)
             if user is None:
                 raise  # pragma: no cover — unexpected
+            # Still update the timestamp for the winner
+            user.last_user_whatsapp_message_at = now
+            self.session.add(user)
+            await self.session.commit()
+            await self.session.refresh(user)
             return user
 
 

@@ -159,6 +159,68 @@ def test_whatsapp_creates_user_without_firebase_uid(phone):
 
 
 # ---------------------------------------------------------------------------
+# WhatsApp 24-hour window: ensure_from_whatsapp sets timestamp
+# **Validates: Bug fix — last_user_whatsapp_message_at must be written**
+# ---------------------------------------------------------------------------
+
+
+@given(phone=_e164_phone)
+@settings(max_examples=20, suppress_health_check=[HealthCheck.too_slow])
+def test_whatsapp_sets_last_message_timestamp_on_create(phone):
+    """ensure_from_whatsapp sets last_user_whatsapp_message_at for new users."""
+
+    async def _test():
+        eng, session = await _make_session()
+        try:
+            await _cleanup(session, phone)
+            before = datetime.now(timezone.utc)
+            svc = UserService(session)
+            user = await svc.ensure_from_whatsapp(phone)
+
+            assert user.last_user_whatsapp_message_at is not None
+            assert user.last_user_whatsapp_message_at >= before
+
+            await _cleanup(session, phone)
+        finally:
+            await session.close()
+            await eng.dispose()
+
+    _run_async(_test())
+
+
+@given(phone=_e164_phone)
+@settings(max_examples=20, suppress_health_check=[HealthCheck.too_slow])
+def test_whatsapp_updates_last_message_timestamp_on_existing(phone):
+    """ensure_from_whatsapp updates last_user_whatsapp_message_at for existing users."""
+
+    async def _test():
+        eng, session = await _make_session()
+        try:
+            await _cleanup(session, phone)
+            svc = UserService(session)
+
+            # First call — creates user
+            user1 = await svc.ensure_from_whatsapp(phone)
+            ts1 = user1.last_user_whatsapp_message_at
+            assert ts1 is not None
+
+            # Second call — updates timestamp
+            user2 = await svc.ensure_from_whatsapp(phone)
+            ts2 = user2.last_user_whatsapp_message_at
+            assert ts2 is not None
+            assert ts2 >= ts1, (
+                f"last_user_whatsapp_message_at went backwards: {ts2} < {ts1}"
+            )
+
+            await _cleanup(session, phone)
+        finally:
+            await session.close()
+            await eng.dispose()
+
+    _run_async(_test())
+
+
+# ---------------------------------------------------------------------------
 # P4: Cross-channel identity linking
 # **Validates: Requirements 2.7**
 # ---------------------------------------------------------------------------
