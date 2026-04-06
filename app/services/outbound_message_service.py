@@ -2,24 +2,41 @@
 
 Pattern:
 1. INSERT OutboundMessage with status=pending (ON CONFLICT DO NOTHING on dedup_key)
-   - If a stale pending row exists (older than CLAIM_TTL_SECONDS), reclaim it
-2. If insert/reclaim succeeded, call Twilio via WhatsAppService
-3. On success: update status=sent with Twilio SID
-4. On exception (ambiguous — Twilio may or may not have accepted):
+   - If a stale row exists (pending or sending, older than CLAIM_TTL_SECONDS),
+     reclaim it — the original worker is assumed crashed.
+2. Atomically transition pending → sending (the "send lock").  This is a
+   compare-and-swap gated on claim_token, so only the worker that owns the
+   claim can enter the sending state.  While a row is in ``sending``, no
+   other worker can reclaim it (reclaim only targets rows older than the TTL).
+3. Call Twilio via WhatsAppService.
+4. On success: update status=sent with Twilio SID.
+5. On definitive rejection (TwilioRestException with 4xx status):
+   release the claim (delete the row) so a retry with corrected
+   config/template can succeed.  The message was never queued for delivery.
+6. On ambiguous failure (5xx, timeout, connection error):
    mark as failed (terminal).  This is the safe at-most-once choice because
    we cannot know whether the message was delivered.
-5. For free-form sends only: if send_reply returns an empty list with no
-   exception (definitive non-delivery), delete the pending row so a retry
-   can re-claim.  Template sends never hit this path — send_template_message
-   either returns a SID or raises.
+7. For free-form sends only: if send_reply returns an empty list with no
+   exception (definitive non-delivery), delete the row so a retry can
+   re-claim.
 
 The unique constraint on dedup_key ensures at most one message is sent per
 logical event, even under concurrent Celery retries or duplicate task dispatch.
 
-Stale claim reclaim: if a worker crashes after claiming (inserting a pending
-row) but before marking sent or failed, the row would block all future
-retries forever.  To handle this, _try_claim checks for pending rows older
-than CLAIM_TTL_SECONDS and reclaims them via an atomic UPDATE.
+Ownership fencing via claim_token + sending status:
+Every claim writes a random UUID into ``claim_token``.  Before calling Twilio,
+the worker atomically transitions pending → sending with a WHERE clause that
+checks both ``status = 'pending'`` and ``claim_token = :token``.  If another
+worker reclaimed the row (writing a new token), this CAS fails and the stale
+worker never calls Twilio.  The ``sending`` status also blocks reclaim: only
+rows older than CLAIM_TTL_SECONDS in pending *or* sending state are eligible
+for reclaim, so a worker actively calling Twilio (fresh ``sending`` row) is
+protected from being reclaimed.
+
+Stale claim reclaim: if a worker crashes after claiming but before marking
+sent or failed, the row would block all future retries forever.  To handle
+this, _try_claim checks for rows in pending/sending state older than
+CLAIM_TTL_SECONDS and reclaims them via an atomic UPDATE.
 
 Dedup key conventions (used by Celery tasks):
 - Recap:          "recap:{call_log_id}"
@@ -33,6 +50,7 @@ Dedup key conventions (used by Celery tasks):
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
@@ -48,9 +66,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# A pending claim older than this is considered abandoned (worker crash).
+# A pending/sending claim older than this is considered abandoned.
 # Must be longer than the longest possible Twilio API round-trip.
 CLAIM_TTL_SECONDS = 300  # 5 minutes
+
+
+def _is_definitive_rejection(exc: Exception) -> bool:
+    """Return True if the exception proves Twilio never accepted the message.
+
+    Definitive rejections (4xx) mean the request was invalid — bad template
+    SID, malformed number, etc.  The message was never queued for delivery,
+    so it is safe to release the dedup claim for a future retry with
+    corrected parameters.
+
+    Ambiguous failures (5xx, timeouts, connection errors) mean Twilio *may*
+    have accepted the request before the error surfaced.  These must remain
+    marked as failed to preserve at-most-once semantics.
+    """
+    try:
+        from twilio.base.exceptions import TwilioRestException
+    except ImportError:  # pragma: no cover — test environments may mock Twilio
+        return False
+
+    if isinstance(exc, TwilioRestException):
+        return 400 <= exc.status < 500
+    return False
 
 
 class OutboundMessageService:
@@ -79,43 +119,69 @@ class OutboundMessageService:
     ) -> str | None:
         """Send a template message with at-most-once dedup guarantee.
 
-        Args:
-            user_id: The user this message belongs to.
-            dedup_key: Unique key for this logical send (e.g. "recap:{call_log_id}").
-            to: Recipient phone in E.164 format.
-            content_sid: Twilio Content SID for the template.
-            content_variables: Template placeholder values.
-
         Returns:
             The Twilio message SID on success, or None if the message was
             already sent (dedup hit) or the send failed.
         """
-        # Step 1: Try to claim the send slot via conflict-ignore insert
-        claimed = await self._try_claim(user_id=user_id, dedup_key=dedup_key)
+        # Step 1: Claim the dedup slot (insert pending row)
+        token = _new_token()
+        claimed = await self._try_claim(
+            user_id=user_id, dedup_key=dedup_key, token=token
+        )
         if not claimed:
             logger.info(
                 "Dedup hit for key=%s user=%s — skipping send", dedup_key, user_id
             )
             return None
 
-        # Step 2: Send via Twilio
+        # Step 2: Acquire send lock (pending → sending, gated on token)
+        locked = await self._acquire_send_lock(dedup_key=dedup_key, token=token)
+        if not locked:
+            logger.warning(
+                "Lost ownership before Twilio call for dedup_key=%s user=%s — "
+                "another worker reclaimed the row between claim and send lock.",
+                dedup_key,
+                user_id,
+            )
+            return None
+
+        # Step 3: Call Twilio (row is in 'sending' state — safe from reclaim)
         try:
             sid = await self._wa.send_template_message(
                 to=to,
                 content_sid=content_sid,
                 content_variables=content_variables,
             )
-        except Exception:
-            logger.exception(
-                "Twilio send failed for dedup_key=%s user=%s", dedup_key, user_id
-            )
-            # Ambiguous: Twilio may have accepted the request before the
-            # exception (e.g. timeout).  Mark as failed to prevent duplicates.
-            await self._mark_failed(dedup_key=dedup_key)
+        except Exception as exc:
+            if _is_definitive_rejection(exc):
+                logger.warning(
+                    "Twilio definitive rejection for dedup_key=%s user=%s: %s",
+                    dedup_key,
+                    user_id,
+                    exc,
+                )
+                await self._release_claim(dedup_key=dedup_key, token=token)
+            else:
+                logger.exception(
+                    "Twilio send failed (ambiguous) for dedup_key=%s user=%s",
+                    dedup_key,
+                    user_id,
+                )
+                await self._mark_failed(dedup_key=dedup_key, token=token)
             return None
 
-        # Step 3: Mark as sent
-        await self._mark_sent(dedup_key=dedup_key, twilio_message_sid=sid)
+        # Step 4: Mark as sent (ownership-fenced)
+        marked = await self._mark_sent(
+            dedup_key=dedup_key, twilio_message_sid=sid, token=token
+        )
+        if not marked:
+            logger.warning(
+                "Ownership lost after Twilio call for dedup_key=%s — "
+                "another worker reclaimed the row. Twilio SID %s may be orphaned.",
+                dedup_key,
+                sid,
+            )
+            return None
         return sid
 
     async def send_freeform_dedup(
@@ -133,7 +199,10 @@ class OutboundMessageService:
         """
         from app.services.whatsapp_service import WhatsAppPartialSendError
 
-        claimed = await self._try_claim(user_id=user_id, dedup_key=dedup_key)
+        token = _new_token()
+        claimed = await self._try_claim(
+            user_id=user_id, dedup_key=dedup_key, token=token
+        )
         if not claimed:
             logger.info(
                 "Dedup hit for key=%s user=%s — skipping freeform send",
@@ -142,11 +211,18 @@ class OutboundMessageService:
             )
             return None
 
+        # Acquire send lock (pending → sending)
+        locked = await self._acquire_send_lock(dedup_key=dedup_key, token=token)
+        if not locked:
+            logger.warning(
+                "Lost ownership before freeform Twilio call for dedup_key=%s",
+                dedup_key,
+            )
+            return None
+
         try:
             sids = await self._wa.send_reply(to=to, body=body)
         except WhatsAppPartialSendError as exc:
-            # Some chunks were delivered — mark as sent with what we have.
-            # Retrying would duplicate the already-sent chunks.
             logger.warning(
                 "Partial freeform send for dedup_key=%s user=%s: %d/%d chunks",
                 dedup_key,
@@ -155,46 +231,69 @@ class OutboundMessageService:
                 exc.total_chunks,
             )
             await self._mark_sent(
-                dedup_key=dedup_key, twilio_message_sid=exc.sent_sids[0]
+                dedup_key=dedup_key,
+                twilio_message_sid=exc.sent_sids[0],
+                token=token,
             )
             return exc.sent_sids
-        except Exception:
-            logger.exception(
-                "Freeform send failed for dedup_key=%s user=%s", dedup_key, user_id
-            )
-            # Ambiguous: Twilio may have accepted before the exception.
-            # Mark as failed to prevent duplicates.
-            await self._mark_failed(dedup_key=dedup_key)
+        except Exception as exc:
+            if _is_definitive_rejection(exc):
+                logger.warning(
+                    "Freeform send definitively rejected for dedup_key=%s user=%s: %s",
+                    dedup_key,
+                    user_id,
+                    exc,
+                )
+                await self._release_claim(dedup_key=dedup_key, token=token)
+            else:
+                logger.exception(
+                    "Freeform send failed (ambiguous) for dedup_key=%s user=%s",
+                    dedup_key,
+                    user_id,
+                )
+                await self._mark_failed(dedup_key=dedup_key, token=token)
             return None
 
         if not sids:
-            # Definitive non-delivery (empty list, no exception).
-            # Safe to release for retry.
-            await self._release_claim(dedup_key=dedup_key)
+            await self._release_claim(dedup_key=dedup_key, token=token)
             return None
 
-        # Use the first SID as the representative
-        await self._mark_sent(dedup_key=dedup_key, twilio_message_sid=sids[0])
+        marked = await self._mark_sent(
+            dedup_key=dedup_key, twilio_message_sid=sids[0], token=token
+        )
+        if not marked:
+            logger.warning(
+                "Ownership lost after freeform Twilio call for dedup_key=%s — "
+                "another worker reclaimed the row.",
+                dedup_key,
+            )
+            return None
         return sids
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _try_claim(self, *, user_id: int, dedup_key: str) -> bool:
+    async def _try_claim(
+        self, *, user_id: int, dedup_key: str, token: str
+    ) -> bool:
         """Insert a pending OutboundMessage row.  Returns True if we won the slot.
 
-        If a ``pending`` row already exists but is older than CLAIM_TTL_SECONDS,
-        it is reclaimed (assumed to be from a crashed worker).  Rows in ``sent``
-        status are never touched — the dedup key is permanently consumed.
+        If a row already exists in ``pending`` or ``sending`` state and is
+        older than CLAIM_TTL_SECONDS, it is reclaimed (assumed to be from a
+        crashed worker) and a *new* ``claim_token`` is written — fencing out
+        the original holder.  The reclaimed row is reset to ``pending``.
+
+        Rows in ``sent`` or ``failed`` status are never touched.
         """
-        # Fast path: try to insert a fresh row
+        # Fast path: try to insert a fresh row with our token
         stmt = (
             pg_insert(OutboundMessage)
             .values(
                 user_id=user_id,
                 dedup_key=dedup_key,
                 status=OutboundMessageStatus.PENDING.value,
+                claim_token=token,
             )
             .on_conflict_do_nothing(constraint="uq_outbound_message_dedup")
         )
@@ -203,12 +302,14 @@ class OutboundMessageService:
         if result.rowcount == 1:  # type: ignore[union-attr]
             return True
 
-        # Conflict — a row exists.  Check if it's a stale pending claim.
+        # Conflict — a row exists.  Check if it's a stale claim.
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=CLAIM_TTL_SECONDS)
         reclaim_stmt = text(
             "UPDATE outbound_messages "
-            "SET created_at = :now, status = :pending "
-            "WHERE dedup_key = :key AND status = :pending AND created_at < :cutoff "
+            "SET created_at = :now, status = :pending, claim_token = :token "
+            "WHERE dedup_key = :key "
+            "  AND status IN (:pending, :sending) "
+            "  AND created_at < :cutoff "
             "RETURNING id"
         )
         reclaim_result = await self._session.execute(
@@ -216,19 +317,19 @@ class OutboundMessageService:
             {
                 "now": datetime.now(timezone.utc),
                 "pending": OutboundMessageStatus.PENDING.value,
+                "sending": OutboundMessageStatus.SENDING.value,
                 "key": dedup_key,
                 "cutoff": cutoff,
+                "token": token,
             },
         )
         await self._session.commit()
         reclaimed = reclaim_result.first() is not None
         if reclaimed:
             logger.info(
-                "Reclaimed stale pending claim for dedup_key=%s", dedup_key
+                "Reclaimed stale claim for dedup_key=%s", dedup_key
             )
         else:
-            # Row exists and is either sent/failed or a fresh pending claim
-            # from another worker — we lost the race.
             logger.info(
                 "Dedup hit (non-stale) for key=%s user=%s — skipping",
                 dedup_key,
@@ -236,69 +337,121 @@ class OutboundMessageService:
             )
         return reclaimed
 
-    async def _mark_sent(self, *, dedup_key: str, twilio_message_sid: str) -> None:
-        """Update the OutboundMessage to sent status."""
+    async def _acquire_send_lock(
+        self, *, dedup_key: str, token: str
+    ) -> bool:
+        """Atomically transition pending → sending, gated on claim_token.
+
+        This is the pre-flight gate before calling Twilio.  If another worker
+        reclaimed the row (writing a different token), this CAS fails and we
+        return False — the caller must NOT proceed to call Twilio.
+
+        While the row is in ``sending`` status with a fresh ``created_at``,
+        it is protected from reclaim (reclaim only targets rows older than
+        CLAIM_TTL_SECONDS).
+        """
+        stmt = text(
+            "UPDATE outbound_messages "
+            "SET status = :sending "
+            "WHERE dedup_key = :key "
+            "  AND status = :pending "
+            "  AND claim_token = :token "
+            "RETURNING id"
+        )
+        result = await self._session.execute(
+            stmt,
+            {
+                "sending": OutboundMessageStatus.SENDING.value,
+                "pending": OutboundMessageStatus.PENDING.value,
+                "key": dedup_key,
+                "token": token,
+            },
+        )
+        await self._session.commit()
+        return result.first() is not None
+
+    async def _mark_sent(
+        self, *, dedup_key: str, twilio_message_sid: str, token: str
+    ) -> bool:
+        """Update the OutboundMessage to sent status.
+
+        Returns True if the row was updated (we still own it), False if
+        another worker reclaimed the row (token mismatch → 0 rows updated).
+        """
         stmt = text(
             "UPDATE outbound_messages "
             "SET status = :status, twilio_message_sid = :sid, sent_at = :now "
-            "WHERE dedup_key = :key AND status = :pending"
+            "WHERE dedup_key = :key "
+            "  AND status = :sending "
+            "  AND claim_token = :token"
         )
-        await self._session.execute(
+        result = await self._session.execute(
             stmt,
             {
                 "status": OutboundMessageStatus.SENT.value,
                 "sid": twilio_message_sid,
                 "now": datetime.now(timezone.utc),
                 "key": dedup_key,
-                "pending": OutboundMessageStatus.PENDING.value,
+                "sending": OutboundMessageStatus.SENDING.value,
+                "token": token,
             },
         )
         await self._session.commit()
+        return result.rowcount > 0  # type: ignore[union-attr]
 
-    async def _mark_failed(self, *, dedup_key: str) -> None:
+    async def _mark_failed(self, *, dedup_key: str, token: str) -> None:
         """Mark the OutboundMessage as permanently failed.
 
-        Used when the Twilio call raised an exception — we cannot know
-        whether the message was accepted, so the safe at-most-once choice
-        is to consume the dedup key permanently.  A stale ``failed`` row
-        will NOT be reclaimed by ``_try_claim`` (only ``pending`` rows are).
+        Used when the Twilio call raised an ambiguous exception.  The token
+        fence ensures we don't overwrite a row that was already reclaimed
+        and sent by another worker.
         """
         stmt = text(
             "UPDATE outbound_messages "
             "SET status = :status "
-            "WHERE dedup_key = :key AND status = :pending"
+            "WHERE dedup_key = :key "
+            "  AND status = :sending "
+            "  AND claim_token = :token"
         )
         await self._session.execute(
             stmt,
             {
                 "status": OutboundMessageStatus.FAILED.value,
                 "key": dedup_key,
-                "pending": OutboundMessageStatus.PENDING.value,
+                "sending": OutboundMessageStatus.SENDING.value,
+                "token": token,
             },
         )
         await self._session.commit()
 
-    async def _release_claim(self, *, dedup_key: str) -> None:
-        """Delete the pending OutboundMessage row so the dedup key can be
-        retried by a future worker.
+    async def _release_claim(self, *, dedup_key: str, token: str) -> None:
+        """Delete the OutboundMessage row so the dedup key can be retried.
 
-        Only used by the free-form send path when ``send_reply`` returns an
-        empty list with no exception — a definitive signal that nothing was
-        delivered.  Template sends never use this: ``send_template_message``
-        either returns a SID or raises, so all template failures go through
-        ``_mark_failed``.
+        Used for definitive rejections (4xx) and free-form zero-chunk sends.
+        Token-fenced: only deletes if we still own the claim.
+        Matches both pending and sending status since release can happen
+        from either state (e.g. 4xx during sending, or zero-chunks).
         """
         await self._session.execute(
             text(
                 "DELETE FROM outbound_messages "
-                "WHERE dedup_key = :key AND status = :pending"
+                "WHERE dedup_key = :key "
+                "  AND status IN (:pending, :sending) "
+                "  AND claim_token = :token"
             ),
             {
                 "key": dedup_key,
                 "pending": OutboundMessageStatus.PENDING.value,
+                "sending": OutboundMessageStatus.SENDING.value,
+                "token": token,
             },
         )
         await self._session.commit()
+
+
+def _new_token() -> str:
+    """Generate a random claim token (UUID4 hex, no dashes)."""
+    return uuid.uuid4().hex
 
 
 # ======================================================================

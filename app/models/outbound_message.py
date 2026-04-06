@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Column, DateTime, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, DateTime, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.models.enums import OutboundMessageStatus
@@ -28,5 +28,13 @@ class OutboundMessage(TimestampMixin, SQLModel, table=True):
     twilio_message_sid: str | None = None
     sent_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True),
+        default=None,
+    )
+    # Ownership token: a UUID written on claim/reclaim.  All subsequent
+    # mutations (_mark_sent, _mark_failed, _release_claim) must match this
+    # token, preventing a stale worker from mutating a row reclaimed by
+    # another worker.
+    claim_token: str | None = Field(
+        sa_column=Column(String, nullable=True),
         default=None,
     )

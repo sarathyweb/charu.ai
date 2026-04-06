@@ -334,10 +334,37 @@ async def _run_due_row_dispatcher() -> dict[str, int]:
                 await session.commit()
 
             # Step 3: Dispatch trigger_call_task outside the DB transaction.
-            task_result = celery_app.send_task(
-                "app.tasks.calls.trigger_call_task",
-                kwargs={"call_log_id": call_log_id},
-            )
+            try:
+                task_result = celery_app.send_task(
+                    "app.tasks.calls.trigger_call_task",
+                    kwargs={"call_log_id": call_log_id},
+                )
+            except Exception:
+                # Broker publish failed — revert the row back to scheduled
+                # so the next dispatcher sweep can re-claim it.
+                logger.exception(
+                    "due_row_dispatcher: broker publish failed for "
+                    "call_log_id=%d, reverting to scheduled",
+                    call_log_id,
+                )
+                async with async_session_factory() as session:
+                    revert_stmt = (
+                        sa_update(CallLog)
+                        .where(
+                            CallLog.id == call_log_id,
+                            CallLog.status == CallLogStatus.DISPATCHING.value,
+                            CallLog.version == version + 1,
+                        )
+                        .values(
+                            status=CallLogStatus.SCHEDULED.value,
+                            version=version + 2,
+                            updated_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await session.exec(revert_stmt)  # type: ignore[call-overload]
+                    await session.commit()
+                errors += 1
+                continue
 
             # Step 4: Store celery_task_id for revocation metadata.
             async with async_session_factory() as session:

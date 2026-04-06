@@ -193,6 +193,106 @@ async def test_template_dedup_exception_blocks_retry(session):
 
 
 # ---------------------------------------------------------------------------
+# Definitive rejection (4xx) releases claim for retry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_template_dedup_definitive_rejection_releases_claim(session):
+    """A definitive Twilio rejection (4xx) should release the claim so a
+    retry with corrected config can succeed — not permanently burn the key."""
+    from twilio.base.exceptions import TwilioRestException
+
+    user = await _ensure_user(session)
+    wa = MagicMock()
+    wa.send_template_message = AsyncMock(
+        side_effect=TwilioRestException(
+            status=400, uri="/Messages", msg="Invalid Content SID"
+        )
+    )
+    svc = OutboundMessageService(session=session, whatsapp_service=wa)
+
+    sid = await svc.send_template_dedup(
+        user_id=user.id,
+        dedup_key="recap:500",
+        to=user.phone,
+        content_sid="HX_bad_template",
+    )
+    assert sid is None
+
+    # Row should be deleted (claim released), NOT marked failed
+    result = await session.exec(
+        select(OutboundMessage).where(OutboundMessage.dedup_key == "recap:500")
+    )
+    assert result.one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_template_dedup_definitive_rejection_allows_retry(session):
+    """After a 4xx releases the claim, a retry with corrected config succeeds."""
+    from twilio.base.exceptions import TwilioRestException
+
+    user = await _ensure_user(session)
+
+    # First attempt: 400 (bad template)
+    wa_bad = MagicMock()
+    wa_bad.send_template_message = AsyncMock(
+        side_effect=TwilioRestException(
+            status=400, uri="/Messages", msg="Invalid Content SID"
+        )
+    )
+    svc1 = OutboundMessageService(session=session, whatsapp_service=wa_bad)
+    await svc1.send_template_dedup(
+        user_id=user.id,
+        dedup_key="recap:501",
+        to=user.phone,
+        content_sid="HX_bad",
+    )
+
+    # Second attempt with corrected template: should succeed
+    wa_ok = _make_wa_service(template_sid="SM_fixed")
+    svc2 = OutboundMessageService(session=session, whatsapp_service=wa_ok)
+    sid2 = await svc2.send_template_dedup(
+        user_id=user.id,
+        dedup_key="recap:501",
+        to=user.phone,
+        content_sid="HX_good",
+    )
+    assert sid2 == "SM_fixed"
+    wa_ok.send_template_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_template_dedup_5xx_still_marks_failed(session):
+    """A 5xx (ambiguous) should still mark as failed — not release the claim."""
+    from twilio.base.exceptions import TwilioRestException
+
+    user = await _ensure_user(session)
+    wa = MagicMock()
+    wa.send_template_message = AsyncMock(
+        side_effect=TwilioRestException(
+            status=500, uri="/Messages", msg="Internal Server Error"
+        )
+    )
+    svc = OutboundMessageService(session=session, whatsapp_service=wa)
+
+    sid = await svc.send_template_dedup(
+        user_id=user.id,
+        dedup_key="recap:502",
+        to=user.phone,
+        content_sid="HX_template",
+    )
+    assert sid is None
+
+    # Row should exist with failed status — NOT deleted
+    result = await session.exec(
+        select(OutboundMessage).where(OutboundMessage.dedup_key == "recap:502")
+    )
+    row = result.one()
+    assert row.status == OutboundMessageStatus.FAILED.value
+
+
+# ---------------------------------------------------------------------------
 # Stale claim reclaim (Finding 2: crashed workers)
 # ---------------------------------------------------------------------------
 

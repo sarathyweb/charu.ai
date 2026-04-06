@@ -4,6 +4,9 @@ All Google API calls (Calendar read/write, Gmail read/write) delegate through
 ``google_api_call`` so that token refresh persistence, auth error handling, and
 retryable-error backoff live in exactly one place.
 
+Token persistence (refresh and clear) uses an independent DB session so that
+commits never leak into the caller's transaction boundary.
+
 Requirements: 10, 11, 15, 17, 18 — Design Error Handling section.
 """
 
@@ -17,8 +20,10 @@ from typing import Any, Callable
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
+from sqlalchemy import update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.db import async_session_factory
 from app.models.user import User
 from app.services.google_oauth_service import encrypt_token
 
@@ -35,34 +40,56 @@ _AUTH_ERROR_CODES = frozenset({401, 403})
 _RETRYABLE_CODES = frozenset({429, 500, 502, 503, 504})
 
 
-async def _clear_google_tokens(user: User, session: AsyncSession) -> None:
-    """Clear all Google OAuth fields on *user* and flush to DB."""
-    user.google_access_token_encrypted = None
-    user.google_refresh_token_encrypted = None
-    user.google_token_expiry = None
-    user.google_granted_scopes = None
-    user.updated_at = datetime.now(timezone.utc)
-    session.add(user)
-    await session.commit()
-    logger.warning("Cleared Google tokens for user %s", user.id)
+async def _clear_google_tokens(user_id: int) -> None:
+    """Clear all Google OAuth fields for *user_id* in an independent session.
+
+    Uses a dedicated session so the commit does not affect any pending
+    mutations on the caller's session.
+    """
+    async with async_session_factory() as session:
+        stmt = (
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                google_access_token_encrypted=None,
+                google_refresh_token_encrypted=None,
+                google_token_expiry=None,
+                google_granted_scopes=None,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.execute(stmt)
+        await session.commit()
+    logger.warning("Cleared Google tokens for user %s", user_id)
 
 
 async def _persist_refreshed_token(
-    user: User,
+    user_id: int,
     credentials: Credentials,
-    session: AsyncSession,
 ) -> None:
-    """Persist a newly refreshed access token + expiry to the User row."""
-    user.google_access_token_encrypted = encrypt_token(credentials.token)
-    user.google_token_expiry = (
+    """Persist a newly refreshed access token + expiry in an independent session.
+
+    Uses a dedicated session so the commit does not affect any pending
+    mutations on the caller's session.
+    """
+    expiry = (
         credentials.expiry.replace(tzinfo=timezone.utc)
         if credentials.expiry and credentials.expiry.tzinfo is None
         else credentials.expiry
     )
-    user.updated_at = datetime.now(timezone.utc)
-    session.add(user)
-    await session.commit()
-    logger.info("Persisted refreshed Google token for user %s", user.id)
+    async with async_session_factory() as session:
+        stmt = (
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                google_access_token_encrypted=encrypt_token(credentials.token),
+                google_token_expiry=expiry,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.execute(stmt)
+        await session.commit()
+    logger.info("Persisted refreshed Google token for user %s", user_id)
 
 
 async def google_api_call(
@@ -76,8 +103,9 @@ async def google_api_call(
     Parameters
     ----------
     user:
-        The ``User`` row whose tokens back *credentials*.  Must be attached
-        to *session* (or at least have a valid ``id``).
+        The ``User`` row whose tokens back *credentials*.  Must have a
+        valid ``id``.  The user object on the caller's session is never
+        mutated by this function.
     credentials:
         A ``google.oauth2.credentials.Credentials`` built from the user's
         stored encrypted tokens (via ``build_google_credentials``).
@@ -88,7 +116,10 @@ async def google_api_call(
         This callable is **synchronous** — it will be run in a thread via
         ``asyncio.to_thread``.
     session:
-        An active ``AsyncSession`` used to persist token updates.
+        The caller's ``AsyncSession``.  Kept in the signature for backward
+        compatibility but **no longer used for token persistence** — token
+        updates use an independent session to avoid committing the caller's
+        pending mutations.
 
     Returns
     -------
@@ -103,7 +134,7 @@ async def google_api_call(
 
             # Check if google-auth silently refreshed the access token.
             if credentials.token != token_before:
-                await _persist_refreshed_token(user, credentials, session)
+                await _persist_refreshed_token(user.id, credentials)
 
             return result
 
@@ -111,7 +142,7 @@ async def google_api_call(
             logger.warning(
                 "Google RefreshError for user %s: %s", user.id, exc,
             )
-            await _clear_google_tokens(user, session)
+            await _clear_google_tokens(user.id)
             return {
                 "error": "google_disconnected",
                 "message": (
@@ -128,7 +159,7 @@ async def google_api_call(
                     "Google HttpError %s for user %s: %s",
                     status, user.id, exc,
                 )
-                await _clear_google_tokens(user, session)
+                await _clear_google_tokens(user.id)
                 return {
                     "error": "google_disconnected",
                     "message": (

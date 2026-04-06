@@ -86,5 +86,6 @@ class OutboundMessageStatus(str, Enum):
     """OutboundMessage.status."""
 
     PENDING = "pending"
+    SENDING = "sending"
     SENT = "sent"
     FAILED = "failed"
