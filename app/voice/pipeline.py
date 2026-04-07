@@ -132,7 +132,15 @@ async def assemble_pipeline(
     )
 
     # ── 5. Context + aggregators (following official Pipecat pattern) ─
-    context = LLMContext(tools=tools)
+    # Seed context with an initial user message to trigger the bot's
+    # opening greeting when inference_on_context_initialization fires.
+    messages = [
+        {
+            "role": "user",
+            "content": "Start the call with your opening greeting.",
+        },
+    ]
+    context = LLMContext(messages, tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -175,11 +183,12 @@ async def assemble_pipeline(
         ),
     )
 
-    # Kick off the conversation when the transport connects
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
+    # Kick off the conversation when the pipeline starts
+    @task.event_handler("on_pipeline_started")
+    async def on_pipeline_started(task, frame):
         logger.info(
-            "voice/pipeline: client connected for call_log_id=%d",
+            "voice/pipeline: pipeline started for call_log_id=%d, "
+            "queuing LLMRunFrame to kick off conversation",
             config.call_log_id,
         )
         await task.queue_frames([LLMRunFrame()])
