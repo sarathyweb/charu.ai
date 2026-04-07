@@ -2,10 +2,8 @@
 
 Assembles a per-call ``PipelineTask`` with:
   - ``FastAPIWebsocketTransport`` + ``TwilioFrameSerializer`` (µ-law ↔ PCM)
-  - ``GeminiLiveLLMService`` (speech-to-speech, Aoede voice, affective dialog)
-  - ``TranscriptProcessor`` for transcript collection
+  - ``GeminiLiveVertexLLMService`` (speech-to-speech, Aoede voice, affective dialog)
   - ``CallTimerProcessor`` for duration enforcement
-  - ``MinWordsInterruptionStrategy(min_words=2)`` for barge-in
 
 Design references:
   - Design §2: Voice Call Pipeline
@@ -21,12 +19,9 @@ from dataclasses import dataclass
 
 from fastapi import WebSocket
 
-from pipecat.audio.interruptions.min_words_interruption_strategy import (
-    MinWordsInterruptionStrategy,
-)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.google.gemini_live import GeminiLiveVertexLLMService
 from pipecat.services.google.gemini_live.llm import GeminiVADParams
@@ -116,56 +111,50 @@ async def assemble_pipeline(
         ),
     )
 
-    # ── 4. Context aggregators ───────────────────────────────────────
-
-    # ── 4a. Register voice tools ─────────────────────────────────────
+    # ── 4. Register voice tools and create context ───────────────────
     tools = register_voice_tools(
         llm,
         call_log_id=config.call_log_id,
         user_id=config.user_id,
     )
 
-    context = OpenAILLMContext(tools=tools)
-    context_aggregator = llm.create_context_aggregator(context)
-
-    user_aggregator = context_aggregator.user()
-    assistant_aggregator = context_aggregator.assistant()
+    context = LLMContext(tools=tools)
 
     # ── 5. Transcript collection ─────────────────────────────────────
     collector = TranscriptCollector()
-    transcript_proc = collector.create_processor()
+
+    # Wire transcript collection via aggregator events
+    # (TranscriptProcessor is deprecated in pipecat 0.0.99+)
+    async def _on_user_turn(aggregator, text):
+        collector.add_user_entry(text)
+
+    async def _on_assistant_turn(aggregator, text):
+        collector.add_assistant_entry(text)
 
     # ── 6. Call timer ────────────────────────────────────────────────
     call_timer = create_call_timer(config.call_type)
 
     # ── 7. Assemble pipeline ─────────────────────────────────────────
     #
-    # Order (per design §2):
-    #   transport.input → transcript.user → user_aggregator
-    #     → call_timer → llm
-    #     → transport.output → transcript.assistant → assistant_aggregator
+    # For Gemini Live (speech-to-speech), the LLM handles audio
+    # directly. We use a minimal pipeline:
+    #   transport.input → call_timer → llm → transport.output
     #
     pipeline = Pipeline(
         [
             transport.input(),
-            transcript_proc.user(),
-            user_aggregator,
             call_timer,
             llm,
             transport.output(),
-            transcript_proc.assistant(),
-            assistant_aggregator,
         ]
     )
 
-    # ── 8. Pipeline task with interruption strategy ──────────────────
+    # ── 8. Pipeline task ─────────────────────────────────────────────
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
-            interruption_strategies=[
-                MinWordsInterruptionStrategy(min_words=2),
-            ],
+            audio_in_sample_rate=8000,
+            audio_out_sample_rate=8000,
         ),
     )
 
