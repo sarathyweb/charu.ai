@@ -599,18 +599,19 @@ async def _run_trigger_call(call_log_id: int) -> dict[str, str]:
     )
 
     base_url = settings.WEBHOOK_BASE_URL.rstrip("/")
-    stream_url = f"{base_url}/voice/stream"
-    # Append token as query parameter for WebSocket auth
-    stream_url_with_token = f"{stream_url}?token={stream_token}"
+    # Twilio <Stream> requires wss:// protocol (the only supported protocol)
+    ws_base = base_url.replace("https://", "wss://").replace("http://", "ws://")
+    stream_url = f"{ws_base}/voice/stream"
 
-    # Build TwiML with proper XML escaping to prevent rejection if any
-    # interpolated value contains &, <, ", etc.
+    # Twilio <Stream> does not support query string parameters —
+    # pass the token as a custom <Parameter> instead.
     from xml.sax.saxutils import quoteattr
 
     twiml = (
         "<Response>"
         "  <Connect>"
-        f'    <Stream url={quoteattr(stream_url_with_token)}>'
+        f'    <Stream url={quoteattr(stream_url)}>'
+        f'      <Parameter name="token" value={quoteattr(stream_token)} />'
         f'      <Parameter name="call_log_id" value={quoteattr(str(call_log_id))} />'
         f'      <Parameter name="user_id" value={quoteattr(str(user_id))} />'
         f'      <Parameter name="call_type" value={quoteattr(str(call_type))} />'

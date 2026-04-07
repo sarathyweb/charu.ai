@@ -278,40 +278,23 @@ async def voice_stream(websocket: WebSocket) -> None:
     """Twilio Media Stream WebSocket endpoint.
 
     Protocol:
-    1. Validate HMAC stream token from query string.
-    2. Accept the WebSocket connection.
-    3. Read Twilio's ``connected`` + ``start`` messages.
-    4. Extract metadata (streamSid, callSid, customParameters).
+    1. Accept the WebSocket connection.
+    2. Read Twilio's ``connected`` + ``start`` messages.
+    3. Extract metadata (streamSid, callSid, customParameters).
+    4. Validate HMAC stream token from custom parameters.
     5. Validate that token's call_log_id/user_id match the custom params.
     6. Look up CallLog, transition to ``in_progress``.
-    7. Enter the media relay loop (placeholder for Pipecat pipeline).
+    7. Run the Pipecat voice pipeline.
     8. On disconnect, perform cleanup.
     """
     # ------------------------------------------------------------------
-    # Step 1: Validate HMAC stream token
-    # ------------------------------------------------------------------
-    token_payload = await _validate_token_from_query(websocket)
-    if token_payload is None:
-        await websocket.close(code=4001, reason="Invalid or missing stream token")
-        return
-
-    token_call_log_id: int = token_payload["call_log_id"]
-    token_user_id: int = token_payload["user_id"]
-
-    logger.info(
-        "voice/stream: token validated — call_log_id=%d, user_id=%d",
-        token_call_log_id,
-        token_user_id,
-    )
-
-    # ------------------------------------------------------------------
-    # Step 2: Accept the WebSocket
+    # Step 1: Accept the WebSocket (must accept before reading messages)
     # ------------------------------------------------------------------
     await websocket.accept()
 
     try:
         # ------------------------------------------------------------------
-        # Step 3: Read Twilio start message
+        # Step 2: Read Twilio start message
         # ------------------------------------------------------------------
         start_msg = await _read_start_message(websocket)
         if start_msg is None:
@@ -320,7 +303,7 @@ async def voice_stream(websocket: WebSocket) -> None:
             return
 
         # ------------------------------------------------------------------
-        # Step 4: Extract Twilio metadata
+        # Step 3: Extract Twilio metadata
         # ------------------------------------------------------------------
         start_data = start_msg.get("start", {})
         stream_sid: str = start_data.get("streamSid", "")
@@ -336,10 +319,34 @@ async def voice_stream(websocket: WebSocket) -> None:
         )
 
         # ------------------------------------------------------------------
+        # Step 4: Validate HMAC stream token from custom parameters
+        # ------------------------------------------------------------------
+        token = custom_params.get("token")
+        if not token:
+            logger.warning("voice/stream: missing token in custom parameters")
+            await websocket.close(code=4001, reason="Missing stream token")
+            return
+
+        settings = get_settings()
+        token_payload = verify_stream_token(secret=settings.STREAM_TOKEN_SECRET, token=token)
+        if token_payload is None:
+            logger.warning("voice/stream: invalid or expired stream token")
+            await websocket.close(code=4001, reason="Invalid stream token")
+            return
+
+        token_call_log_id: int = token_payload["call_log_id"]
+        token_user_id: int = token_payload["user_id"]
+
+        logger.info(
+            "voice/stream: token validated — call_log_id=%d, user_id=%d",
+            token_call_log_id,
+            token_user_id,
+        )
+
+        # ------------------------------------------------------------------
         # Step 5: Validate token claims against Twilio metadata
         # ------------------------------------------------------------------
         # Validate AccountSid matches our configured Twilio account
-        settings = get_settings()
         if account_sid and account_sid != settings.TWILIO_ACCOUNT_SID:
             logger.warning(
                 "voice/stream: AccountSid mismatch — token for our account "
