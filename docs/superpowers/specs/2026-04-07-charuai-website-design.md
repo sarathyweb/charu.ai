@@ -52,7 +52,7 @@ Coordinate inner/outer radii on nested elements.
 
 - ADHD adults 25-40, especially "Drowning Professionals" (lawyers, accountants, engineers losing billable hours)
 - Remote knowledge workers struggling with task initiation
-- People who've tried planners, apps, reminders — all abandoned within weeks
+- People who've tried planners, apps, reminders - all abandoned within weeks
 - People who need external human-like presence, not another notification
 
 ## Core Positioning
@@ -83,9 +83,9 @@ Coordinate inner/outer radii on nested elements.
 - **Sticky** on scroll, `#fdf8f3` cream bg, subtle `#e8e0d8` bottom border
 - **Logo** (left): "Charu" in DM Serif Display, `#5c3520`
 - **Nav links** (center): How It Works / Features / About (anchor scroll)
-  - Inter, `#7a5c3f`, 14px — smaller than body, doesn't compete with hero
+  - Inter, `#7a5c3f`, 14px - smaller than body, doesn't compete with hero
   - Concise labels, consistent format
-- **CTA button** (right): "Try Charu" — `#5c3520` bg, white text, 24px pill radius
+- **CTA button** (right): "Try Charu" - `#5c3520` bg, white text, 24px pill radius
   - Visually distinct from nav active states
 - **Mobile:** Hamburger menu, CTA stays visible
 - Max 5 nav items
@@ -102,10 +102,10 @@ Coordinate inner/outer radii on nested elements.
 - Names the product
 
 **Subhead** (Inter, 18px, `#7a5c3f`):
-> "An AI accountability partner that calls your phone and checks in on WhatsApp. Daily calls, calendar sync, and task tracking — no new app to download."
+> "An AI accountability partner that calls your phone and checks in on WhatsApp. Daily calls, calendar sync, and task tracking - no new app to download."
 
 - Explains what + who + how
-- "Calls your phone" is the differentiator — Charu makes real phone calls via Twilio, not WhatsApp voice
+- "Calls your phone" is the differentiator - Charu makes real phone calls via Twilio, not WhatsApp voice
 - WhatsApp is the chat/check-in channel
 - "No new app" removes friction
 
@@ -115,7 +115,7 @@ Coordinate inner/outer radii on nested elements.
 - CTA aligned left, within natural scan path
 - Button doesn't overpower headline
 
-**Visual:** Right side — styled WhatsApp conversation mockup showing:
+**Visual:** Right side - styled WhatsApp conversation mockup showing:
 - Charu: "Hey! How are you feeling about today?"
 - User: "I have 20 things to do and can't start"
 - Charu: "That happens. Let's pick one small thing. What feels most urgent?"
@@ -136,18 +136,18 @@ Mockup designed as unified composition with text (not a separate asset). Fits wi
 
 **3 pain cards** (white bg, 16px radius, subtle shadow), each with icon + text:
 
-1. "You have 20 things to do and can't start any of them. It's not laziness — your brain just won't bridge the gap between knowing and doing."
+1. "You have 20 things to do and can't start any of them. It's not laziness - your brain just won't bridge the gap between knowing and doing."
 
 2. "Your day ends and you're not sure what you actually did. The guilt hits at 11pm, and you promise tomorrow will be different. It never is."
 
-3. "You've tried the planners. The apps. The reminders you swipe away without reading. They all worked for a week — then became background noise."
+3. "You've tried the planners. The apps. The reminders you swipe away without reading. They all worked for a week - then became background noise."
 
 - Each card names a pain + adds an emotional layer (guilt, the graveyard)
 - Uses exact customer language
 - Centered layout, generous whitespace
 
 **Dream bridge** (after cards, centered text):
-> "Imagine ending every day knowing you actually did the thing. Not everything — just the thing that mattered."
+> "Imagine ending every day knowing you actually did the thing. Not everything - just the thing that mattered."
 
 - Flips pain into desired outcome before showing the fix
 - Modest, not grandiose
@@ -162,10 +162,10 @@ Mockup designed as unified composition with text (not a separate asset). Fits wi
 **Subhead:**
 > "Three steps to a calmer day."
 
-**3 numbered steps** — horizontal desktop, vertical mobile. Visual connectors (subtle lines/arrows) between steps to reinforce sequence.
+**3 numbered steps** - horizontal desktop, vertical mobile. Visual connectors (subtle lines/arrows) between steps to reinforce sequence.
 
 **Step 1: "Say hi on WhatsApp"**
-- "Message Charu. Tell her your name and when you'd like your calls. That's it — two minutes, no app to download."
+- "Message Charu. Tell her your name and when you'd like your calls. That's it - two minutes, no app to download."
 - Visual: WhatsApp screenshot of onboarding conversation
 
 **Step 2: "Get daily check-in calls"**
@@ -179,7 +179,7 @@ Mockup designed as unified composition with text (not a separate asset). Fits wi
 Each step: Large number (DM Serif Display, `#5c3520`), bold headline (Inter), description (Inter, `#7a5c3f`), visual mockup.
 
 **CTA after steps:**
-> "Start on WhatsApp" — pill button, `#5c3520` bg
+> "Start on WhatsApp" - pill button, `#5c3520` bg
 
 **Outcome closer** (centered text after CTA):
 > "Your day, handled."
@@ -194,14 +194,14 @@ Each step: Large number (DM Serif Display, `#5c3520`), bold headline (Inter), de
 **Grid:** 3x2 desktop, single column mobile. One featured card (Daily accountability calls) spans 2 columns on desktop for visual hierarchy.
 
 **Featured card (larger):**
-- **Daily accountability calls** — "Morning, midday, and evening. Charu calls your phone — not a notification you swipe away. A voice that shows up when you're stuck in task paralysis."
+- **Daily accountability calls** - "Morning, midday, and evening. Charu calls your phone - not a notification you swipe away. A voice that shows up when you're stuck in task paralysis."
 
 **Standard cards (5):**
-- **WhatsApp check-ins** — "Quick nudges between calls. Like body doubling, but in your pocket — just the chat you already have."
-- **Your calendar, handled** — "Charu sees your day, finds the gaps, and blocks time for the work that matters — so you don't have to fight executive dysfunction alone."
-- **Emails that need replies** — "She surfaces the ones you're avoiding. Drafts a reply. You just say yes. No more inbox paralysis."
-- **Tasks you mention, tracked** — "Say it once, it's saved. Finish it, it's done. No separate app to open and abandon after a week."
-- **Adapts to your day** — "Reschedule calls, skip one, or say 'call me in 30 minutes.' She never ghosts, never judges."
+- **WhatsApp check-ins** - "Quick nudges between calls. Like body doubling, but in your pocket - just the chat you already have."
+- **Your calendar, handled** - "Charu sees your day, finds the gaps, and blocks time for the work that matters - so you don't have to fight executive dysfunction alone."
+- **Emails that need replies** - "She surfaces the ones you're avoiding. Drafts a reply. You just say yes. No more inbox paralysis."
+- **Tasks you mention, tracked** - "Say it once, it's saved. Finish it, it's done. No separate app to open and abandon after a week."
+- **Adapts to your day** - "Reschedule calls, skip one, or say 'call me in 30 minutes.' She never ghosts, never judges."
 
 Cards: white bg, 16px radius, subtle shadow, left-aligned text. Icon + bold headline (Inter, `#3b2314`) + one-line outcome-focused copy (Inter, `#7a5c3f`). Clear type contrast between headline and description.
 
@@ -217,14 +217,14 @@ Cards: white bg, 16px radius, subtle shadow, left-aligned text. Icon + bold head
 
 **Copy** (Inter, 16px, 2-3 short paragraphs):
 
-> "Starting tasks is genuinely hard. It's not a character flaw — it's a gap between knowing and doing that no planner or reminder can fix."
+> "Starting tasks is genuinely hard. It's not a character flaw - it's a gap between knowing and doing that no planner or reminder can fix."
 
-> "Charu doesn't say 'just do it' or guilt you into productivity. She shows up like a friend who gets it — calls you, asks what matters, and helps you take the first step. If you miss a call, no big deal. She'll be there tomorrow."
+> "Charu doesn't say 'just do it' or guilt you into productivity. She shows up like a friend who gets it - calls you, asks what matters, and helps you take the first step. If you miss a call, no big deal. She'll be there tomorrow."
 
-> "People already pay humans $30-40 a month for exactly this — daily accountability calls that actually work. We built the AI version, so it never ghosts, never judges, and costs a fraction of a coach."
+> "People already pay humans $30-40 a month for exactly this - daily accountability calls that actually work. We built the AI version, so it never ghosts, never judges, and costs a fraction of a coach."
 
 - **Transformation outcome:** "Your morning starts with a plan. Your day has structure. And you stop going to bed wondering where it all went."
-- **Social proof line:** "Designed around what people with ADHD actually need — not what productivity gurus think they need."
+- **Social proof line:** "Designed around what people with ADHD actually need - not what productivity gurus think they need."
 - **Supporting imagery:** Warm illustration or abstract visual reinforcing human connection
 
 **Soft CTA at end of section:**
@@ -237,7 +237,7 @@ Cards: white bg, 16px radius, subtle shadow, left-aligned text. Icon + bold head
 **Heading** (DM Serif Display, 36px, white):
 > "Ready to stop planning and start doing?"
 
-**Subhead** (Inter, 16px, `rgba(255,255,255,0.75)` — lower opacity for hierarchy):
+**Subhead** (Inter, 16px, `rgba(255,255,255,0.75)` - lower opacity for hierarchy):
 > "Two minutes to set up. No app to download. No judgment if you miss a day."
 
 **CTA:**
@@ -251,10 +251,10 @@ Verify WCAG AA contrast: use pure white for body text on brown bg. Cream only fo
 **Background:** `#3b2314` (dark brown, clearly distinct from CTA section)
 
 - **Logo** (left): "Charu" in cream
-- **Links** (right): Privacy Policy / Terms & Conditions — subtle underline or lighter color for discoverability
+- **Links** (right): Privacy Policy / Terms & Conditions - subtle underline or lighter color for discoverability
 - **Copyright:** "2026 Charu AI. Made with care for people who struggle to start."
 - Body-small (14px), subdued, consistent styling on legal links
-- Footer reduces visual intensity — never pulls attention from CTA above
+- Footer reduces visual intensity - never pulls attention from CTA above
 
 ### 9. /privacy
 
@@ -273,13 +273,13 @@ Verify WCAG AA contrast: use pure white for body text on brown bg. Cream only fo
 1. What data we collect (phone number, name, timezone, Google OAuth tokens)
 2. How we use your data (accountability calls, task management, calendar/email integration)
 3. WhatsApp & Twilio (message routing, call delivery, no message content stored by Twilio beyond delivery)
-4. Google integration (OAuth scopes: Calendar read/write, Gmail read/send — used only for features user explicitly connects)
+4. Google integration (OAuth scopes: Calendar read/write, Gmail read/send - used only for features user explicitly connects)
 5. Data storage & security (PostgreSQL on GCP, encrypted tokens, no plain-text credentials)
 6. Data retention (active account data kept while subscribed, deleted within 30 days of account deletion)
-7. Your rights (access, export, delete your data — contact: privacy@charuai.com)
-8. Third-party services (Google Cloud, Twilio, Vertex AI — links to their privacy policies)
+7. Your rights (access, export, delete your data - contact: sarathy@sarathywebservices.com)
+8. Third-party services (Google Cloud, Twilio, Vertex AI - links to their privacy policies)
 9. Changes to this policy (notification via WhatsApp)
-10. Contact (privacy@charuai.com)
+10. Contact (sarathy@sarathywebservices.com)
 
 ### 10. /terms
 
@@ -312,7 +312,7 @@ Breakpoints aligned with Tailwind defaults:
 
 ```
 // Render both variants server-side, toggle via Tailwind responsive classes.
-// No JS-based viewport detection — avoids hydration mismatch.
+// No JS-based viewport detection - avoids hydration mismatch.
 
 <div className="hidden md:block">  // QR code + fallback link
 <div className="block md:hidden">  // Full-width wa.me pill button
@@ -337,7 +337,7 @@ QR code generated at build time or via a lightweight client component.
 
 ## SEO & Analytics
 
-- **Page title:** "Charu AI — Your accountability partner that actually calls you"
+- **Page title:** "Charu AI - Your accountability partner that actually calls you"
 - **Meta description:** "Charu calls your phone every day to help you start, stay on track, and finish. Daily check-ins on WhatsApp. No new app to download."
 - **OG image:** Hero mockup with headline text, warm cream background, 1200x630px
 - **Favicon:** "C" lettermark in `#5c3520` on cream
@@ -356,10 +356,11 @@ All copy is informed by validated research from the personal-assistant-research 
 
 ## Copy Voice Rules (from research)
 
-1. Mirror the audience's own language — "executive dysfunction" not "lack of motivation"
-2. Acknowledge the tool graveyard — they've tried everything
-3. Name the shame, then dissolve it — "it's not a character flaw"
-4. Position as presence, not tool — "something that opens you" not "something you open"
-5. Non-judgment is structural — after missed calls, tone is "no big deal"
-6. Never imply willpower deficit — the problem is neurological, not moral
-7. The word "remind" is toxic — use "check in," "show up," "call"
+1. Mirror the audience's own language - "executive dysfunction" not "lack of motivation"
+2. Acknowledge the tool graveyard - they've tried everything
+3. Name the shame, then dissolve it - "it's not a character flaw"
+4. Position as presence, not tool - "something that opens you" not "something you open"
+5. Non-judgment is structural - after missed calls, tone is "no big deal"
+6. Never imply willpower deficit - the problem is neurological, not moral
+7. The word "remind" is toxic - use "check in," "show up," "call"
+8. No em dashes or emojis in any user-facing copy
