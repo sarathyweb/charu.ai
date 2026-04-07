@@ -13,7 +13,6 @@ Design references:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
@@ -23,7 +22,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from zoneinfo import ZoneInfo
 
-from app.celery_app import celery_app
+from app.celery_app import celery_app, run_async
 from app.db import async_session_factory
 from app.models.call_log import CallLog
 from app.models.call_window import CallWindow
@@ -424,7 +423,7 @@ async def _run_due_row_dispatcher() -> dict[str, int]:
 @celery_app.task(name="app.tasks.calls.daily_planner")
 def daily_planner() -> str:
     """Materialize next day's calls for all active users/windows."""
-    result = asyncio.run(_run_daily_planner())
+    result = run_async(_run_daily_planner())
     return (
         f"daily_planner: {result['users_processed']} users, "
         f"{result['created']} created, {result['skipped']} skipped"
@@ -434,7 +433,7 @@ def daily_planner() -> str:
 @celery_app.task(name="app.tasks.calls.planner_catchup_sweep")
 def planner_catchup_sweep() -> str:
     """Catch-up sweep for newly onboarded users or missed materializations."""
-    result = asyncio.run(_run_catchup_sweep())
+    result = run_async(_run_catchup_sweep())
     return (
         f"planner_catchup_sweep: {result['users_processed']} users, "
         f"{result['created']} created, {result['skipped']} skipped"
@@ -458,7 +457,7 @@ def due_row_dispatcher() -> str:
       - Design §3: Dispatch state transitions (step 1)
       - Property 34: At-most-once call dispatch
     """
-    result = asyncio.run(_run_due_row_dispatcher())
+    result = run_async(_run_due_row_dispatcher())
     return (
         f"due_row_dispatcher: {result['claimed']} dispatched, "
         f"{result['skipped']} already claimed, "
@@ -513,7 +512,7 @@ def stale_dispatching_sweep() -> str:
     Safety net for the rare case where both the broker publish and the
     revert fail, or a worker crashes mid-dispatch.  Runs every 5 minutes.
     """
-    count = asyncio.run(_run_stale_dispatching_sweep())
+    count = run_async(_run_stale_dispatching_sweep())
     return f"stale_dispatching_sweep: reclaimed {count} rows"
 
 
@@ -769,7 +768,7 @@ def trigger_call_task(call_log_id: int) -> str:
       - Property 34: At-most-once call dispatch
       - Property 42: WebSocket stream token validation
     """
-    result = asyncio.run(_run_trigger_call(call_log_id))
+    result = run_async(_run_trigger_call(call_log_id))
     return (
         f"trigger_call_task: call_log_id={call_log_id}, "
         f"status={result['status']}"

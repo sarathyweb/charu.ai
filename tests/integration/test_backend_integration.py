@@ -452,6 +452,16 @@ class TestWhatsAppFlowIntegration:
                 "app.api.whatsapp.WhatsAppService",
                 return_value=mock_wa_svc_inst,
             ),
+            patch(
+                "app.api.whatsapp.find_pending_checkin",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.api.whatsapp.find_pending_draft",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             transport = ASGITransport(app=app)
             async with AsyncClient(
@@ -598,6 +608,16 @@ class TestWhatsAppFlowIntegration:
             ),
             patch("app.api.whatsapp.UserService") as mock_user_svc_cls,
             patch("app.api.whatsapp.AgentService") as mock_agent_svc_cls,
+            patch(
+                "app.api.whatsapp.find_pending_checkin",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.api.whatsapp.find_pending_draft",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             mock_user_svc_cls.return_value = AsyncMock()
             mock_agent_svc_cls.return_value.run = AsyncMock(
@@ -655,6 +675,16 @@ class TestWhatsAppFlowIntegration:
             patch(
                 "app.api.whatsapp.WhatsAppService",
                 return_value=mock_wa_svc_inst,
+            ),
+            patch(
+                "app.api.whatsapp.find_pending_checkin",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.api.whatsapp.find_pending_draft",
+                new_callable=AsyncMock,
+                return_value=None,
             ),
         ):
             transport = ASGITransport(app=app)

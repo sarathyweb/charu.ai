@@ -96,13 +96,26 @@ def _make_call_log(
     tz: str = "America/New_York",
     occurrence_kind: str = OccurrenceKind.PLANNED.value,
 ) -> CallLog:
-    """Build a CallLog instance (not yet persisted)."""
-    scheduled = datetime.now(timezone.utc) + timedelta(hours=hours_ahead)
-    local_date = scheduled.astimezone(ZoneInfo(tz)).date()
+    """Build a CallLog instance (not yet persisted).
+
+    ``call_date`` is always set to *today* in the given timezone so that
+    ``find_today`` will match the row regardless of wall-clock proximity to
+    midnight.  ``scheduled_time`` is placed ``hours_ahead`` from now but
+    clamped to the same local date.
+    """
+    now_utc = datetime.now(timezone.utc)
+    local_now = now_utc.astimezone(ZoneInfo(tz))
+    local_today = local_now.date()
+    scheduled = now_utc + timedelta(hours=hours_ahead)
+    # Clamp: if hours_ahead pushes into next local day, pin to 23:59 today
+    if scheduled.astimezone(ZoneInfo(tz)).date() != local_today:
+        scheduled = datetime.combine(
+            local_today, time(23, 59), tzinfo=ZoneInfo(tz)
+        ).astimezone(timezone.utc)
     return CallLog(
         user_id=user_id,
         call_type=call_type,
-        call_date=local_date,
+        call_date=local_today,
         scheduled_time=scheduled,
         scheduled_timezone=tz,
         status=status,
@@ -281,8 +294,10 @@ async def test_cancel_all_transitions_to_cancelled(
     created_ids = []
     for i in range(num_calls):
         ct = call_types[i % len(call_types)]
+        # Use a small hours_ahead offset (minutes apart) so all calls land on
+        # the same local date regardless of when the test runs.
         cl = await cls.create_call_log(
-            _make_call_log(user.id, call_type=ct, hours_ahead=1.0 + i)
+            _make_call_log(user.id, call_type=ct, hours_ahead=0.1 + i * 0.01)
         )
         created_ids.append(cl.id)
 

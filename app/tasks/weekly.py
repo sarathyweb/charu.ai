@@ -17,14 +17,13 @@ Design references:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlmodel import col, select
 
-from app.celery_app import celery_app
+from app.celery_app import celery_app, run_async
 from app.config import get_settings
 from app.db import async_session_factory
 from app.models.call_log import CallLog
@@ -225,7 +224,7 @@ async def _run_check_and_send_weekly_summaries() -> str:
 @celery_app.task(name="app.tasks.weekly.check_and_send_weekly_summaries")
 def check_and_send_weekly_summaries() -> str:
     """Hourly sweep: send weekly summary to users whose local time is Sunday 5 PM."""
-    return asyncio.run(_run_check_and_send_weekly_summaries())
+    return run_async(_run_check_and_send_weekly_summaries())
 
 
 @celery_app.task(
@@ -243,7 +242,7 @@ def send_weekly_summary(self, user_id: int) -> str:
     Requirements: 5.6
     """
     try:
-        return asyncio.run(_run_send_weekly_summary(user_id))
+        return run_async(_run_send_weekly_summary(user_id))
     except Exception as exc:
         logger.exception(
             "send_weekly_summary failed for user_id=%d", user_id,

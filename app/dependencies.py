@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 
 from fastapi import Depends, Request
+from google.adk.artifacts import BaseArtifactService
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -26,6 +27,11 @@ def get_runner(request: Request) -> Runner:
 def get_session_service(request: Request) -> DatabaseSessionService:
     """Return the ADK DatabaseSessionService stored on app state during lifespan."""
     return request.app.state.session_service
+
+
+def get_artifact_service(request: Request) -> BaseArtifactService:
+    """Return the ADK ArtifactService stored on app state during lifespan."""
+    return request.app.state.artifact_service
 
 
 def get_user_service(

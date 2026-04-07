@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "celery[redis]>=5.6.3",
     "celery-redbeat>=2.3.3",
+    "pipecat-ai[google,websocket]>=0.0.105",
 ]
 
 [project.optional-dependencies]

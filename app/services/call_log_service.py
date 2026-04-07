@@ -53,6 +53,7 @@ VALID_TRANSITIONS: dict[CallLogStatus, set[CallLogStatus]] = {
     },
     CallLogStatus.IN_PROGRESS: {
         CallLogStatus.COMPLETED,
+        CallLogStatus.MISSED,  # early disconnect, pipeline failure, AMD machine detection
         CallLogStatus.DEFERRED,
     },
     # Terminal states — no outgoing transitions

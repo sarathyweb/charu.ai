@@ -17,14 +17,13 @@ Design references:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import update
 from sqlmodel import col, delete
 
-from app.celery_app import celery_app
+from app.celery_app import celery_app, run_async
 from app.db import async_session_factory
 from app.models.call_log import CallLog
 from app.models.email_draft_state import EmailDraftState
@@ -149,16 +148,16 @@ async def _run_cleanup_old_call_logs() -> str:
 @celery_app.task(name="app.tasks.cleanup.expire_stale_drafts")
 def expire_stale_drafts() -> str:
     """Abandon non-terminal email drafts older than 2 hours."""
-    return asyncio.run(_run_expire_stale_drafts())
+    return run_async(_run_expire_stale_drafts())
 
 
 @celery_app.task(name="app.tasks.cleanup.cleanup_old_transcripts")
 def cleanup_old_transcripts() -> str:
     """Delete transcript artifacts older than 30 days, null out CallLog.transcript_filename."""
-    return asyncio.run(_run_cleanup_old_transcripts())
+    return run_async(_run_cleanup_old_transcripts())
 
 
 @celery_app.task(name="app.tasks.cleanup.cleanup_old_call_logs")
 def cleanup_old_call_logs() -> str:
     """Delete call log entries older than 90 days."""
-    return asyncio.run(_run_cleanup_old_call_logs())
+    return run_async(_run_cleanup_old_call_logs())

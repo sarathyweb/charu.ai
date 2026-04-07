@@ -49,7 +49,6 @@ logger = logging.getLogger(__name__)
 MODEL = "gemini-3-flash-preview"
 
 _GENERATION_CONFIG = types.GenerateContentConfig(
-    max_output_tokens=400,
     temperature=0.4,
 )
 

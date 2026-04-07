@@ -1,8 +1,9 @@
 """Redis-backed ephemeral OAuth token system.
 
-Provides single-use, time-limited tokens for WhatsApp-initiated Google OAuth
-flows.  Tokens are stored in Redis with a 10-minute TTL and consumed
-atomically via ``GETDEL`` (Redis ≥ 6.2) to guarantee single-winner semantics.
+Provides time-limited tokens for WhatsApp-initiated Google OAuth flows.
+Tokens are stored in Redis with a 10-minute TTL and allow a small number
+of uses (default 3) to tolerate link-preview crawlers (WhatsApp, Facebook)
+that prefetch URLs before the real user clicks.
 
 No DB fallback — Redis is a hard dependency (Celery broker), so it is always
 available in any environment that runs the application.
@@ -27,7 +28,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _KEY_PREFIX = "oauth_ephemeral:"
+_USES_PREFIX = "oauth_ephemeral_uses:"
 _TTL_SECONDS = 600  # 10 minutes
+_MAX_USES = 3  # tolerate link-preview crawlers
 
 
 # ---------------------------------------------------------------------------
@@ -65,10 +68,15 @@ async def create_ephemeral_token(user_id: int, service: str) -> str:
     key = f"{_KEY_PREFIX}{token}"
     payload = json.dumps({"user_id": user_id, "service": service})
 
+    uses_key = f"{_USES_PREFIX}{token}"
+
     r = None
     try:
         r = await _get_redis()
-        await r.set(key, payload, ex=_TTL_SECONDS)
+        async with r.pipeline(transaction=True) as pipe:
+            pipe.set(key, payload, ex=_TTL_SECONDS)
+            pipe.set(uses_key, _MAX_USES, ex=_TTL_SECONDS)
+            await pipe.execute()
         logger.debug("Ephemeral token created for user_id=%s service=%s", user_id, service)
     finally:
         if r is not None:
@@ -95,19 +103,43 @@ async def validate_ephemeral_token(token: str) -> dict | None:
         token is expired, already consumed, or never existed.
     """
     key = f"{_KEY_PREFIX}{token}"
+    uses_key = f"{_USES_PREFIX}{token}"
 
     r = None
     try:
         r = await _get_redis()
-        raw: str | None = await r.getdel(key)
+        # Atomically decrement the use counter
+        remaining = await r.decr(uses_key)
+        if remaining < 0:
+            # Counter exhausted or key missing (DECR on missing key gives -1).
+            # Delete the junk key that DECR auto-created so it doesn't linger
+            # in Redis with no TTL.
+            await r.delete(uses_key)
+            logger.debug("Ephemeral token exhausted or not found")
+            return None
+
+        raw: str | None = await r.get(key)
     finally:
         if r is not None:
             await r.aclose()
 
     if raw is None:
-        logger.debug("Ephemeral token not found or already consumed")
+        logger.debug("Ephemeral token payload expired or not found")
         return None
 
     data: dict = json.loads(raw)
-    logger.debug("Ephemeral token consumed for user_id=%s service=%s", data.get("user_id"), data.get("service"))
+
+    # Clean up both keys after last use
+    if remaining == 0:
+        try:
+            r = await _get_redis()
+            await r.delete(key, uses_key)
+        finally:
+            if r is not None:
+                await r.aclose()
+
+    logger.debug(
+        "Ephemeral token validated for user_id=%s service=%s (uses_remaining=%d)",
+        data.get("user_id"), data.get("service"), remaining,
+    )
     return data

@@ -17,13 +17,12 @@ Design references:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import random
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from app.celery_app import celery_app
+from app.celery_app import celery_app, run_async
 from app.config import get_settings
 from app.db import async_session_factory
 from app.models.call_log import CallLog
@@ -233,7 +232,7 @@ def send_midday_checkin(self, call_log_id: int) -> str:
     Requirements: 13, 12
     """
     try:
-        return asyncio.run(_run_send_midday_checkin(call_log_id))
+        return run_async(_run_send_midday_checkin(call_log_id))
     except Exception as exc:
         logger.exception(
             "send_midday_checkin failed for call_log_id=%d", call_log_id,

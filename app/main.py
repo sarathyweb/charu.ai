@@ -16,6 +16,9 @@ logging.basicConfig(
 for _name in ("httpx", "httpcore", "google.auth", "urllib3"):
     logging.getLogger(_name).setLevel(logging.WARNING)
 
+# Enable DEBUG for ADK internals to see full tool calls, results, and LLM prompts
+logging.getLogger("google_adk").setLevel(logging.DEBUG)
+
 # Load .env into os.environ BEFORE any ADK imports — ADK's genai Client
 # reads GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, etc. directly
 # from os.environ, not from pydantic Settings.
@@ -25,6 +28,7 @@ import firebase_admin
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_admin import credentials
+from google.adk.artifacts import InMemoryArtifactService
 from google.adk.plugins import ReflectAndRetryToolPlugin
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
@@ -34,6 +38,7 @@ from app.api.auth_sync import router as auth_sync_router
 from app.api.chat import router as chat_router
 from app.api.google_oauth import router as google_oauth_router
 from app.api.health import router as health_router
+from app.api.voice import router as voice_router
 from app.api.whatsapp import router as whatsapp_router
 from app.config import get_settings
 from app.db import create_db_tables
@@ -49,8 +54,9 @@ async def lifespan(app: FastAPI):
     1. Initialize Firebase Admin SDK (idempotent — skips if already init'd).
     2. Create SQLModel tables in PostgreSQL.
     3. Create ADK DatabaseSessionService backed by the same PostgreSQL.
-    4. Create ADK Runner wired to the root_agent.
-    5. Store runner + session_service on app.state for dependency injection.
+    4. Create ADK InMemoryArtifactService for transcript storage.
+    5. Create ADK Runner wired to the root_agent with session + artifact services.
+    6. Store runner, session_service, artifact_service on app.state for DI.
     """
     settings = get_settings()
 
@@ -66,18 +72,22 @@ async def lifespan(app: FastAPI):
 
     # --- ADK session service + runner -----------------------------------------
     session_service = DatabaseSessionService(db_url=settings.DATABASE_URL)
+    artifact_service = InMemoryArtifactService()
     runner = Runner(
         agent=root_agent,
         app_name=APP_NAME,
         session_service=session_service,
+        artifact_service=artifact_service,
         plugins=[ReflectAndRetryToolPlugin(max_retries=2)],
     )
     logger.info(
-        "ADK Runner and DatabaseSessionService initialized (with ReflectAndRetry plugin)"
+        "ADK Runner, DatabaseSessionService, and InMemoryArtifactService initialized "
+        "(with ReflectAndRetry plugin)"
     )
 
     app.state.runner = runner
     app.state.session_service = session_service
+    app.state.artifact_service = artifact_service
 
     yield
 
@@ -104,3 +114,4 @@ app.include_router(auth_sync_router)
 app.include_router(chat_router)
 app.include_router(whatsapp_router)
 app.include_router(google_oauth_router)
+app.include_router(voice_router)

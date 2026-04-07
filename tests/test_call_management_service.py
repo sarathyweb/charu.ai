@@ -67,11 +67,29 @@ def _make_call_log(
     status: str = CallLogStatus.SCHEDULED.value,
     hours_ahead: float = 1,
     tz: str = "America/New_York",
+    pin_today: bool = True,
     **kwargs,
 ) -> CallLog:
-    """Build a CallLog instance (not yet persisted)."""
-    scheduled = datetime.now(timezone.utc) + timedelta(hours=hours_ahead)
+    """Build a CallLog instance (not yet persisted).
+
+    When *pin_today* is True (the default), ``call_date`` and
+    ``scheduled_time`` are clamped to today in the given timezone so that
+    ``find_today`` always matches regardless of wall-clock proximity to
+    midnight.  Set *pin_today=False* for tests that intentionally need a
+    future date (e.g. ``get_next_call`` ordering).
+    """
+    now_utc = datetime.now(timezone.utc)
+    scheduled = now_utc + timedelta(hours=hours_ahead)
     local_date = scheduled.astimezone(ZoneInfo(tz)).date()
+
+    if pin_today:
+        local_today = now_utc.astimezone(ZoneInfo(tz)).date()
+        if local_date != local_today:
+            scheduled = datetime.combine(
+                local_today, time(23, 59), tzinfo=ZoneInfo(tz)
+            ).astimezone(timezone.utc)
+            local_date = local_today
+
     return CallLog(
         user_id=user_id,
         call_type=call_type,
@@ -342,10 +360,10 @@ class TestGetNextCall:
     async def test_returns_earliest(self, session, svc, cls):
         user = await _create_user(session, "+15555000003")
         cl_far = await cls.create_call_log(
-            _make_call_log(user.id, hours_ahead=48)
+            _make_call_log(user.id, hours_ahead=48, pin_today=False)
         )
         cl_near = await cls.create_call_log(
-            _make_call_log(user.id, call_type=CallType.AFTERNOON.value, hours_ahead=2)
+            _make_call_log(user.id, call_type=CallType.AFTERNOON.value, hours_ahead=2, pin_today=False)
         )
 
         result = await svc.get_next_call(user.id)

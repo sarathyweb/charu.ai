@@ -115,6 +115,6 @@ def build_google_credentials(
         token_uri="https://oauth2.googleapis.com/token",
         client_id=settings.GOOGLE_OAUTH_CLIENT_ID,
         client_secret=settings.GOOGLE_OAUTH_CLIENT_SECRET,
-        expiry=token_expiry,
+        expiry=token_expiry.replace(tzinfo=None) if token_expiry and token_expiry.tzinfo else token_expiry,
         scopes=scopes,
     )

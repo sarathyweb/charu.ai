@@ -127,6 +127,10 @@ class CallLog(TimestampMixin, SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True),
         default=None,
     )
+    checkin_replied_at: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+        default=None,
+    )
 
     # ── Concurrency ──────────────────────────────────────────────────────
     version: int = Field(default=1)

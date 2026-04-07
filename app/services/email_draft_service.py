@@ -130,6 +130,7 @@ class EmailDraftService:
         self,
         draft_id: int,
         new_draft_text: str,
+        user_id: int,
     ) -> EmailDraftState:
         """Update an existing draft after user requests changes.
 
@@ -138,10 +139,13 @@ class EmailDraftService:
         at ``MAX_REVISIONS`` (5).
 
         Raises:
-            ValueError: If draft not found, in wrong state, or revision
-                cap exceeded.
+            ValueError: If draft not found, not owned by user, in wrong
+                state, or revision cap exceeded.
         """
         draft = await self._get_draft_or_raise(draft_id)
+
+        if draft.user_id != user_id:
+            raise ValueError("Draft does not belong to this user.")
 
         allowed = {DraftStatus.PENDING_REVIEW.value, DraftStatus.REVISION_REQUESTED.value}
         if draft.status not in allowed:
@@ -209,7 +213,14 @@ class EmailDraftService:
             session=self.session,
         )
 
-        # Commit the final state (sent or error)
+        # If the send failed, roll the draft back to pending_review so the
+        # user can retry via the normal approval flow.
+        if result.get("status") not in ("sent", "already_sent"):
+            draft.status = DraftStatus.PENDING_REVIEW.value
+            draft.updated_at = datetime.now(timezone.utc)
+            self.session.add(draft)
+
+        # Commit the final state (sent, already_sent, or rolled-back pending_review)
         await self.session.commit()
         return result
 

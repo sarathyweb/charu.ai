@@ -85,6 +85,57 @@ celery_app.Task = PatchedTask  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
+# Per-worker asyncio runner — one event loop per worker process
+# ---------------------------------------------------------------------------
+from celery.signals import worker_process_init, worker_process_shutdown  # noqa: E402
+
+_runner: asyncio.Runner | None = None
+
+
+def run_async(coro):
+    """Run an async coroutine on the worker's shared event loop.
+
+    Replaces ``asyncio.run()`` in Celery tasks.  ``asyncio.run()`` creates
+    (and closes) a new event loop each time, but the module-level async
+    engine's connection pool is bound to a single loop.  Using a persistent
+    ``asyncio.Runner`` keeps all tasks on the same loop so the pool stays
+    valid.
+    """
+    if _runner is None:
+        raise RuntimeError(
+            "run_async() called outside a Celery worker process "
+            "(no Runner initialised)"
+        )
+    return _runner.run(coro)
+
+
+@worker_process_init.connect
+def _init_worker_runner(**kwargs):
+    """Set up the per-worker asyncio Runner and dispose inherited connections.
+
+    1. Dispose the inherited asyncpg pool (fork-safety — connections hold
+       Futures from the parent's dead loop).
+    2. Create a persistent ``asyncio.Runner`` whose loop all tasks share,
+       keeping the async engine's pool bound to one consistent loop.
+    """
+    global _runner
+
+    from app.db import engine  # noqa: F811
+    engine.sync_engine.dispose(close=False)
+
+    _runner = asyncio.Runner()
+
+
+@worker_process_shutdown.connect
+def _close_worker_runner(**kwargs):
+    """Tear down the per-worker asyncio Runner on graceful shutdown."""
+    global _runner
+    if _runner is not None:
+        _runner.close()
+        _runner = None
+
+
+# ---------------------------------------------------------------------------
 # Beat schedule — periodic tasks
 # ---------------------------------------------------------------------------
 celery_app.conf.beat_schedule = {
