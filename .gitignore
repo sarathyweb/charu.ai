@@ -33,3 +33,6 @@ Thumbs.db
 secrets/
 docs/
 uv.lock
+
+# Website (separate repo for deployment)
+website/
