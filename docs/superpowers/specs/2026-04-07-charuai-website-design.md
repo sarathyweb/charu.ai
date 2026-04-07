@@ -59,10 +59,9 @@ Coordinate inner/outer radii on nested elements.
 
 "This audience does not need another tool they have to remember to open. They need something that opens them."
 
-- **Not a productivity app.** An accountability presence.
-- **Not reminders.** Phone calls you can't swipe away.
-- **Not a chatbot.** A friend who gets it.
-- **Not motivation.** Structure. Presence. Activation.
+- Charu is an accountability presence, not a productivity app.
+- She calls your phone. You can't swipe that away.
+- She sounds like a friend who gets it, because the whole system was built around how people with ADHD actually talk about what they need.
 
 ## Key Research-Backed Copy Principles
 
@@ -169,11 +168,11 @@ Mockup designed as unified composition with text (not a separate asset). Fits wi
 - Visual: WhatsApp screenshot of onboarding conversation
 
 **Step 2: "Get daily check-in calls"**
-- "Charu calls you every morning to plan, midday to nudge, and evening to reflect. She asks what matters, then helps you start."
+- "Morning call to plan your day. Afternoon call to check in. Evening call to wrap up. She asks what matters most and helps you start."
 - Visual: Phone notification mockup of incoming Charu call
 
 **Step 3: "Actually finish things"**
-- "Tasks tracked. Calendar blocked. Emails handled. All through the same WhatsApp chat you already use."
+- "Your tasks get tracked, your calendar gets blocked, your emails get answered. All through the same WhatsApp chat you already use."
 - Visual: Task list / calendar mockup in WhatsApp
 
 Each step: Large number (DM Serif Display, `#5c3520`), bold headline (Inter), description (Inter, `#7a5c3f`), visual mockup.
@@ -194,7 +193,7 @@ Each step: Large number (DM Serif Display, `#5c3520`), bold headline (Inter), de
 **Grid:** 3x2 desktop, single column mobile. One featured card (Daily accountability calls) spans 2 columns on desktop for visual hierarchy.
 
 **Featured card (larger):**
-- **Daily accountability calls** - "Morning, midday, and evening. Charu calls your phone - not a notification you swipe away. A voice that shows up when you're stuck in task paralysis."
+- **Daily accountability calls** - "Three calls a day. Your phone rings, you pick up, and someone asks what you need to get done. That's it. No notification to swipe away."
 
 **Standard cards (5):**
 - **WhatsApp check-ins** - "Quick nudges between calls. Like body doubling, but in your pocket - just the chat you already have."
@@ -224,7 +223,7 @@ Cards: white bg, 16px radius, subtle shadow, left-aligned text. Icon + bold head
 > "People already pay humans $30-40 a month for exactly this - daily accountability calls that actually work. We built the AI version, so it never ghosts, never judges, and costs a fraction of a coach."
 
 - **Transformation outcome:** "Your morning starts with a plan. Your day has structure. And you stop going to bed wondering where it all went."
-- **Social proof line:** "Designed around what people with ADHD actually need - not what productivity gurus think they need."
+- **Social proof line:** "We read thousands of posts from people describing what they actually need. Then we built that."
 - **Supporting imagery:** Warm illustration or abstract visual reinforcing human connection
 
 **Soft CTA at end of section:**
@@ -364,3 +363,4 @@ All copy is informed by validated research from the personal-assistant-research 
 6. Never imply willpower deficit - the problem is neurological, not moral
 7. The word "remind" is toxic - use "check in," "show up," "call"
 8. No em dashes or emojis in any user-facing copy
+9. Avoid AI writing tells: no "Not X, but Y" parallelisms, no rule-of-three lists ("X. Y. Z."), no "serves as" / "stands as" / "boasts", no "delve" / "tapestry" / "vibrant" / "landscape" / "foster" / "underscore" / "showcase" / "pivotal" / "crucial" / "enhance". Write like a person talking, not a language model generating.
