@@ -18,7 +18,7 @@ import sqlalchemy as sa
 import sqlmodel  # noqa: F401
 
 revision: str = "874259efad71"
-down_revision: Union[str, Sequence[str], None] = None
+down_revision: Union[str, Sequence[str], None] = "000000000001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
