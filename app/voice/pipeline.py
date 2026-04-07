@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from fastapi import WebSocket
 
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.serializers.twilio import TwilioFrameSerializer
