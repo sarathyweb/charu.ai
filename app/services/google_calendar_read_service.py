@@ -31,6 +31,8 @@ def _build_calendar_service(credentials: Any) -> Any:
 async def fetch_todays_events(
     user: User,
     session: AsyncSession,
+    *,
+    max_retries: int | None = None,
 ) -> list[dict] | dict:
     """Fetch today's calendar events for *user*.
 
@@ -65,6 +67,7 @@ async def fetch_todays_events(
             timeZone=user.timezone,
         ).execute(),
         session=session,
+        max_retries=max_retries,
     )
 
     # Propagate structured errors from the wrapper.

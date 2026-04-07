@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect
 
@@ -292,6 +293,14 @@ async def voice_stream(websocket: WebSocket) -> None:
     # ------------------------------------------------------------------
     await websocket.accept()
 
+    result = None
+    token_call_log_id: int | None = None
+    token_user_id: int | None = None
+    stream_sid = "unknown"
+    call_type = "morning"
+    call_ctx: dict = {}
+    pipeline_failed = False
+
     try:
         # ------------------------------------------------------------------
         # Step 2: Read Twilio start message
@@ -426,7 +435,7 @@ async def voice_stream(websocket: WebSocket) -> None:
         from app.voice.context import prepare_call_context
 
         system_instruction = ""
-        call_ctx: dict = {}
+        context_started_at = perf_counter()
         try:
             async with async_session_factory() as ctx_session:
                 system_instruction, call_ctx = await prepare_call_context(
@@ -436,9 +445,10 @@ async def voice_stream(websocket: WebSocket) -> None:
                 )
             logger.info(
                 "voice/stream: built system instruction for "
-                "call_log_id=%d (%d chars)",
+                "call_log_id=%d (%d chars, %.1fms)",
                 token_call_log_id,
                 len(system_instruction),
+                (perf_counter() - context_started_at) * 1000,
             )
         except Exception:
             logger.exception(
@@ -470,10 +480,14 @@ async def voice_stream(websocket: WebSocket) -> None:
         # consults TranscriptCollector.first_user_utterance_at to
         # determine if the call ended before meaningful interaction.
         disconnect_detector = EarlyDisconnectDetector()
-        pipeline_failed = False
-
         try:
+            pipeline_started_at = perf_counter()
             result = await assemble_pipeline(websocket, pipeline_config)
+            logger.info(
+                "voice/stream: assembled pipeline for call_log_id=%d in %.1fms",
+                token_call_log_id,
+                (perf_counter() - pipeline_started_at) * 1000,
+            )
 
             # Mark the moment the pipeline is ready and running
             disconnect_detector.mark_connected()
@@ -514,17 +528,17 @@ async def voice_stream(websocket: WebSocket) -> None:
                 token_call_log_id,
             )
 
-    except WebSocketDisconnect:
-        logger.info(
-            "voice/stream: early disconnect for call_log_id=%d",
-            token_call_log_id,
-        )
-    except Exception:
-        pipeline_failed = True
-        logger.exception(
-            "voice/stream: unexpected error for call_log_id=%d",
-            token_call_log_id,
-        )
+        except WebSocketDisconnect:
+            logger.info(
+                "voice/stream: early disconnect for call_log_id=%s",
+                token_call_log_id if token_call_log_id is not None else "unknown",
+            )
+        except Exception:
+            pipeline_failed = True
+            logger.exception(
+                "voice/stream: unexpected error for call_log_id=%s",
+                token_call_log_id if token_call_log_id is not None else "unknown",
+            )
     finally:
         # ------------------------------------------------------------------
         # Step 8: Cleanup — early disconnect detection and post-call actions
@@ -610,10 +624,10 @@ async def voice_stream(websocket: WebSocket) -> None:
                     )
 
         logger.info(
-            "voice/stream: connection ended for call_log_id=%d, "
+            "voice/stream: connection ended for call_log_id=%s, "
             "stream_sid=%s",
-            token_call_log_id,
-            stream_sid if "stream_sid" in dir() else "unknown",
+            token_call_log_id if token_call_log_id is not None else "unknown",
+            stream_sid,
         )
 
 

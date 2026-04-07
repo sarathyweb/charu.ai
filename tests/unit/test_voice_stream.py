@@ -66,9 +66,17 @@ def _make_start_message(
     call_log_id: int = 1,
     user_id: int = 42,
     call_type: str = "morning",
+    token: str | None = None,
 ) -> list[str]:
     """Return the connected + start messages that Twilio sends."""
     connected = json.dumps({"event": "connected", "protocol": "Call", "version": "1.0.0"})
+    custom_parameters = {
+        "call_log_id": str(call_log_id),
+        "user_id": str(user_id),
+        "call_type": call_type,
+    }
+    if token is not None:
+        custom_parameters["token"] = token
     start = json.dumps({
         "event": "start",
         "sequenceNumber": "1",
@@ -77,11 +85,7 @@ def _make_start_message(
             "accountSid": account_sid,
             "callSid": call_sid,
             "tracks": ["inbound", "outbound"],
-            "customParameters": {
-                "call_log_id": str(call_log_id),
-                "user_id": str(user_id),
-                "call_type": call_type,
-            },
+            "customParameters": custom_parameters,
             "mediaFormat": {
                 "encoding": "audio/x-mulaw",
                 "sampleRate": 8000,
@@ -142,38 +146,47 @@ class TestVoiceStreamTokenValidation:
     """Token validation at WebSocket connection time."""
 
     def test_missing_token_closes_with_4001(self):
-        """No token query param → close 4001."""
+        """Missing customParameter token → close 4001."""
         app = _make_test_app()
+        messages = _make_start_message()
 
         with patch("app.api.voice.get_settings", return_value=_mock_settings()):
             client = TestClient(app)
             with pytest.raises(WebSocketDisconnect) as exc_info:
-                with client.websocket_connect("/voice/stream"):
-                    pass  # pragma: no cover
+                with client.websocket_connect("/voice/stream") as websocket:
+                    websocket.send_text(messages[0])
+                    websocket.send_text(messages[1])
+                    websocket.receive_text()
             assert exc_info.value.code == 4001
 
     def test_expired_token_closes_with_4001(self):
-        """Expired token → close 4001."""
+        """Expired customParameter token → close 4001."""
         token = _make_token(ttl=-10)
         app = _make_test_app()
+        messages = _make_start_message(token=token)
 
         with patch("app.api.voice.get_settings", return_value=_mock_settings()):
             client = TestClient(app)
             with pytest.raises(WebSocketDisconnect) as exc_info:
-                with client.websocket_connect(f"/voice/stream?token={token}"):
-                    pass  # pragma: no cover
+                with client.websocket_connect("/voice/stream") as websocket:
+                    websocket.send_text(messages[0])
+                    websocket.send_text(messages[1])
+                    websocket.receive_text()
             assert exc_info.value.code == 4001
 
     def test_invalid_signature_closes_with_4001(self):
-        """Token signed with wrong secret → close 4001."""
+        """Wrong-signature customParameter token → close 4001."""
         token = _make_token(secret="wrong-secret")
         app = _make_test_app()
+        messages = _make_start_message(token=token)
 
         with patch("app.api.voice.get_settings", return_value=_mock_settings()):
             client = TestClient(app)
             with pytest.raises(WebSocketDisconnect) as exc_info:
-                with client.websocket_connect(f"/voice/stream?token={token}"):
-                    pass  # pragma: no cover
+                with client.websocket_connect("/voice/stream") as websocket:
+                    websocket.send_text(messages[0])
+                    websocket.send_text(messages[1])
+                    websocket.receive_text()
             assert exc_info.value.code == 4001
 
 

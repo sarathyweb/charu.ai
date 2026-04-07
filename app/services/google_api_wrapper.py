@@ -104,6 +104,9 @@ async def google_api_call(
     credentials: Credentials,
     api_callable: Callable[[], Any],
     session: AsyncSession,
+    *,
+    max_retries: int | None = None,
+    backoff_seconds: tuple[int, ...] | None = None,
 ) -> Any:
     """Execute a Google API call with automatic token-refresh persistence and error handling.
 
@@ -127,13 +130,22 @@ async def google_api_call(
         compatibility but **no longer used for token persistence** — token
         updates use an independent session to avoid committing the caller's
         pending mutations.
+    max_retries:
+        Optional override for retryable ``429/5xx`` responses. ``None`` keeps
+        the default wrapper behavior.
+    backoff_seconds:
+        Optional override for retry delays on retryable errors. ``None`` keeps
+        the default wrapper behavior.
 
     Returns
     -------
     The raw result from the Google API on success, or a structured error
     ``dict`` with an ``"error"`` key on auth / quota / server failures.
     """
-    for attempt in range(_MAX_RETRIES + 1):
+    retry_limit = _MAX_RETRIES if max_retries is None else max_retries
+    retry_backoff = _BACKOFF_SECONDS if backoff_seconds is None else backoff_seconds
+
+    for attempt in range(retry_limit + 1):
         token_before = credentials.token
 
         try:
@@ -176,12 +188,12 @@ async def google_api_call(
                 }
 
             if status in _RETRYABLE_CODES:
-                if attempt < _MAX_RETRIES:
-                    delay = _BACKOFF_SECONDS[attempt]
+                if attempt < retry_limit:
+                    delay = retry_backoff[min(attempt, len(retry_backoff) - 1)]
                     logger.info(
                         "Google HttpError %s for user %s, retrying in %ss "
                         "(attempt %d/%d)",
-                        status, user.id, delay, attempt + 1, _MAX_RETRIES,
+                        status, user.id, delay, attempt + 1, retry_limit,
                     )
                     await asyncio.sleep(delay)
                     continue
@@ -193,7 +205,7 @@ async def google_api_call(
                 )
                 logger.error(
                     "Google HttpError %s for user %s after %d retries",
-                    status, user.id, _MAX_RETRIES,
+                    status, user.id, retry_limit,
                 )
                 return {
                     "error": error_type,

@@ -6,7 +6,10 @@ requiring a database. DB-dependent integration is tested separately.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -22,6 +25,7 @@ from app.voice.context import (
     _format_yesterday_section,
     _safe_format_opener,
     build_system_instruction,
+    build_morning_context,
 )
 
 
@@ -322,6 +326,11 @@ class TestBuildMorningInstruction:
         assert "TestUser" in instruction
         assert "Phase 1" in instruction
 
+    def test_contains_tool_bridge_rule(self):
+        instruction = build_system_instruction("morning", self._make_ctx())
+        assert "Before calling a tool" in instruction
+        assert "After a tool returns" in instruction
+
 
 # ---------------------------------------------------------------------------
 # build_system_instruction — evening
@@ -357,6 +366,11 @@ class TestBuildEveningInstruction:
         assert "Acknowledgment" in instruction
         assert "Tomorrow's Intention" in instruction
         assert "Wrap-Up" in instruction
+
+    def test_contains_tool_bridge_rule(self):
+        instruction = build_system_instruction("evening", self._make_ctx())
+        assert "Before calling a tool" in instruction
+        assert "After a tool returns" in instruction
 
     def test_contains_3_minute_duration(self):
         instruction = build_system_instruction("evening", self._make_ctx())
@@ -400,3 +414,67 @@ class TestBuildEveningInstruction:
     def test_no_shame_language_rule(self):
         instruction = build_system_instruction("evening", self._make_ctx())
         assert "NEVER use shame" in instruction
+
+
+@pytest.mark.asyncio
+async def test_build_morning_context_times_out_calendar_fetch(monkeypatch):
+    user = SimpleNamespace(
+        id=42,
+        name="TestUser",
+        timezone="UTC",
+        google_granted_scopes="calendar.readonly",
+        last_opener_id=None,
+        last_approach=None,
+        consecutive_active_days=2,
+        last_active_date=date.today(),
+    )
+    session = AsyncMock()
+
+    async def slow_calendar_fetch(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        return []
+
+    monkeypatch.setattr(
+        "app.voice.context._VOICE_CONTEXT_CALENDAR_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    with (
+        patch("app.voice.context.TaskService") as task_service_cls,
+        patch("app.voice.context._fetch_yesterday_outcome", AsyncMock(return_value=None)),
+        patch("app.voice.context.fetch_todays_events", AsyncMock(side_effect=slow_calendar_fetch)),
+    ):
+        task_service = task_service_cls.return_value
+        task_service.list_pending_tasks = AsyncMock(return_value=[])
+
+        ctx = await build_morning_context(user, session)
+
+    assert ctx["calendar_context"] == "Could not fetch calendar events."
+    assert ctx["available_context"]["has_calendar"] is False
+
+
+@pytest.mark.asyncio
+async def test_build_morning_context_uses_fast_fail_calendar_retries():
+    user = SimpleNamespace(
+        id=42,
+        name="TestUser",
+        timezone="UTC",
+        google_granted_scopes="calendar.readonly",
+        last_opener_id=None,
+        last_approach=None,
+        consecutive_active_days=2,
+        last_active_date=date.today(),
+    )
+    session = AsyncMock()
+
+    with (
+        patch("app.voice.context.TaskService") as task_service_cls,
+        patch("app.voice.context._fetch_yesterday_outcome", AsyncMock(return_value=None)),
+        patch("app.voice.context.fetch_todays_events", AsyncMock(return_value=[])) as fetch_events,
+    ):
+        task_service = task_service_cls.return_value
+        task_service.list_pending_tasks = AsyncMock(return_value=[])
+
+        await build_morning_context(user, session)
+
+    fetch_events.assert_awaited_once_with(user, session, max_retries=0)

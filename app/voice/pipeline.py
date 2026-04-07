@@ -6,8 +6,9 @@ Assembles a per-call ``PipelineTask`` with:
   - ``LLMContextAggregatorPair`` for context management
   - ``CallTimerProcessor`` for duration enforcement
 
-Based on the official Pipecat Gemini Live + Twilio example:
-  https://github.com/pipecat-ai/pipecat-examples/tree/main/gemini-live-starters/phone-bot
+Based on official Pipecat Gemini Live references:
+  - https://github.com/pipecat-ai/pipecat-examples/tree/main/gemini-live-starters/phone-bot
+  - https://github.com/pipecat-ai/pipecat/blob/main/examples/realtime/realtime-gemini-live-vertex-function-calling.py
 
 Design references:
   - Design §2: Voice Call Pipeline
@@ -22,8 +23,8 @@ import logging
 from dataclasses import dataclass
 
 from fastapi import WebSocket
+from google.genai.types import ThinkingConfig
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -31,7 +32,6 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
 )
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.google.gemini_live import GeminiLiveVertexLLMService
@@ -47,6 +47,8 @@ from app.voice.tools import register_voice_tools
 from app.voice.transcript_handler import TranscriptCollector
 
 logger = logging.getLogger(__name__)
+
+_VOICE_TOOL_TIMEOUT_SECONDS = 3.0
 
 
 # ── Data classes ─────────────────────────────────────────────────────────
@@ -113,12 +115,14 @@ async def assemble_pipeline(
     llm = GeminiLiveVertexLLMService(
         project_id=settings.GOOGLE_CLOUD_PROJECT,
         location=settings.GOOGLE_CLOUD_LIVE_LOCATION,
+        function_call_timeout_secs=_VOICE_TOOL_TIMEOUT_SECONDS,
         settings=GeminiLiveVertexLLMService.Settings(
             model="gemini-live-2.5-flash-native-audio",
             system_instruction=system_instruction,
             voice="Aoede",
             temperature=0.7,
             language="en-US",
+            thinking=ThinkingConfig(thinking_budget=0),
             enable_affective_dialog=True,
             vad=GeminiVADParams(silence_duration_ms=500),
         ),
@@ -141,12 +145,9 @@ async def assemble_pipeline(
         },
     ]
     context = LLMContext(messages, tools=tools)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
+    # Gemini Live provides server-side turn detection by default. Prefer that
+    # path in the Vertex voice pipeline to avoid per-call local VAD warmup.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     # ── 6. Transcript collection via aggregator events ───────────────
     collector = TranscriptCollector()
@@ -158,6 +159,15 @@ async def assemble_pipeline(
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message):
         collector.add_assistant_entry(message.content)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        function_names = ", ".join(fc.function_name for fc in function_calls)
+        logger.info(
+            "voice/pipeline: tool call(s) started for call_log_id=%d: %s",
+            config.call_log_id,
+            function_names,
+        )
 
     # ── 7. Call timer ────────────────────────────────────────────────
     call_timer = create_call_timer(config.call_type)
@@ -183,11 +193,12 @@ async def assemble_pipeline(
         ),
     )
 
-    # Kick off the conversation when the pipeline starts
-    @task.event_handler("on_pipeline_started")
-    async def on_pipeline_started(task, frame):
+    # Kick off the conversation once the transport reports a connected client,
+    # matching the upstream Gemini Live transport examples.
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
         logger.info(
-            "voice/pipeline: pipeline started for call_log_id=%d, "
+            "voice/pipeline: client connected for call_log_id=%d, "
             "queuing LLMRunFrame to kick off conversation",
             config.call_log_id,
         )
@@ -209,6 +220,8 @@ def _default_instruction(call_type: str) -> str:
             "Ask what the user accomplished today, acknowledge positively, "
             "and ask if there is one thing they want to prioritize tomorrow. "
             "Keep it brief and calming. "
+            "Before calling a tool, first say one short sentence telling the user what you're doing. "
+            "After a tool returns, immediately tell the user the result in plain language. "
             "When you receive a message starting with [SYSTEM:], treat it "
             "as an internal instruction — do NOT read it aloud."
         )
@@ -218,6 +231,8 @@ def _default_instruction(call_type: str) -> str:
         "Greet the user warmly, help them identify their most important "
         "goal for today, and break it down into a concrete next action. "
         "Keep responses short — 1-3 sentences. "
+        "Before calling a tool, first say one short sentence telling the user what you're doing. "
+        "After a tool returns, immediately tell the user the result in plain language. "
         "When you receive a message starting with [SYSTEM:], treat it "
         "as an internal instruction — do NOT read it aloud."
     )

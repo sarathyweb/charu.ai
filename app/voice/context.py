@@ -15,8 +15,10 @@ Requirements: 4, 10, 12, 20
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
+from time import perf_counter
 from zoneinfo import ZoneInfo
 from typing import Any
 
@@ -43,6 +45,8 @@ from app.services.google_calendar_read_service import (
 from app.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
+
+_VOICE_CONTEXT_CALENDAR_TIMEOUT_SECONDS = 1.5
 
 
 # ---------------------------------------------------------------------------
@@ -169,29 +173,29 @@ async def build_morning_context(
     user_id = user.id
     assert user_id is not None
 
+    calendar_task: asyncio.Task[tuple[str, bool]] | None = None
+
     # 1. Pending tasks
     task_svc = TaskService(session)
-    pending_tasks = await task_svc.list_pending_tasks(user_id, limit=5)
-
-    # 2. Calendar events (best-effort — don't fail the call if calendar errors)
-    calendar_text = "Calendar not connected."
-    has_calendar_events = False
     if _has_calendar(user) and user.timezone:
-        try:
-            events = await fetch_todays_events(user, session)
-            if isinstance(events, list):
-                calendar_text = format_events_for_agent(events, user.timezone)
-                has_calendar_events = len(events) > 0
-            else:
-                calendar_text = "Could not fetch calendar events."
-        except Exception:
-            logger.exception("Failed to fetch calendar events for user %s", user_id)
-            calendar_text = "Could not fetch calendar events."
+        calendar_task = asyncio.create_task(_fetch_calendar_context(user, session))
 
-    # 3. Yesterday's outcome
-    yesterday_call = await _fetch_yesterday_outcome(user_id, session)
+    try:
+        pending_tasks = await task_svc.list_pending_tasks(user_id, limit=5)
 
-    # 4. Anti-habituation: available context flags
+        # 3. Yesterday's outcome
+        yesterday_call = await _fetch_yesterday_outcome(user_id, session)
+
+        # 4. Calendar events (best-effort — don't fail the call if calendar errors)
+        calendar_text = "Calendar not connected."
+        has_calendar_events = False
+        if calendar_task is not None:
+            calendar_text, has_calendar_events = await calendar_task
+    finally:
+        if calendar_task is not None and not calendar_task.done():
+            calendar_task.cancel()
+
+    # 5. Anti-habituation: available context flags
     has_yesterday = (
         yesterday_call is not None
         and yesterday_call.goal is not None
@@ -202,21 +206,21 @@ async def build_morning_context(
         "has_yesterday": has_yesterday,
     }
 
-    # 5. Select opener
+    # 6. Select opener
     opener = select_opener(
         MORNING_OPENER_POOL,
         user.last_opener_id,
         available_context,
     )
 
-    # 6. Select approach
+    # 7. Select approach
     approach = select_approach(
         user.last_approach,
         has_calendar_events=has_calendar_events,
         has_pending_tasks=len(pending_tasks) > 0,
     )
 
-    # 7. Streak tracking
+    # 8. Streak tracking
     today = _user_today(user)
     new_streak, new_last_active = update_streak(
         user.consecutive_active_days,
@@ -224,7 +228,7 @@ async def build_morning_context(
         today,
     )
 
-    # 8. Two-week variation
+    # 9. Two-week variation
     variation = get_two_week_variation(new_streak)
     variation_text: str | None = None
     if variation:
@@ -247,6 +251,51 @@ async def build_morning_context(
         "two_week_variation": variation_text,
         "available_context": available_context,
     }
+
+
+async def _fetch_calendar_context(
+    user: User,
+    session: AsyncSession,
+) -> tuple[str, bool]:
+    """Fetch calendar context for live voice calls with a small startup budget.
+
+    Calendar enrichment is helpful but optional. The live call should greet the
+    user even if Google Calendar is slow or retryable errors occur.
+    """
+    user_id = user.id
+    assert user_id is not None
+
+    started_at = perf_counter()
+
+    try:
+        async with asyncio.timeout(_VOICE_CONTEXT_CALENDAR_TIMEOUT_SECONDS):
+            events = await fetch_todays_events(user, session, max_retries=0)
+    except TimeoutError:
+        logger.warning(
+            "prepare_call_context: calendar fetch timed out for user %s after %.0fms",
+            user_id,
+            _VOICE_CONTEXT_CALENDAR_TIMEOUT_SECONDS * 1000,
+        )
+        return "Could not fetch calendar events.", False
+    except Exception:
+        logger.exception("Failed to fetch calendar events for user %s", user_id)
+        return "Could not fetch calendar events.", False
+    finally:
+        logger.info(
+            "prepare_call_context: calendar fetch finished for user %s in %.1fms",
+            user_id,
+            (perf_counter() - started_at) * 1000,
+        )
+
+    if isinstance(events, list):
+        return format_events_for_agent(events, user.timezone or "UTC"), len(events) > 0
+
+    logger.warning(
+        "prepare_call_context: calendar fetch returned structured error for user %s: %s",
+        user_id,
+        events.get("error") if isinstance(events, dict) else "unknown",
+    )
+    return "Could not fetch calendar events.", False
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +548,9 @@ def _build_morning_instruction(
         "- If the user drifts, acknowledge briefly then redirect",
         "- If the user has no goal, suggest reviewing pending tasks or picking one small thing",
         "- You MUST call save_call_outcome before ending the call",
+        "- Before calling a tool, first say one short sentence telling the user what you're doing",
+        "- After a tool returns, immediately tell the user the result in plain language",
+        "- Do not go silent before a tool call when a short spoken bridge would help",
         "- When you receive a message starting with [SYSTEM:], treat it as an internal "
         "instruction — do NOT read it aloud or acknowledge it to the user",
         "",
@@ -585,6 +637,9 @@ def _build_evening_instruction(ctx: dict[str, Any]) -> str:
         "- NEVER use shame, guilt, or disappointment language",
         "- The evening call is about closure, not productivity pressure",
         "- You MUST call save_evening_call_outcome before ending the call",
+        "- Before calling a tool, first say one short sentence telling the user what you're doing",
+        "- After a tool returns, immediately tell the user the result in plain language",
+        "- Do not go silent before a tool call when a short spoken bridge would help",
         "- When you receive a message starting with [SYSTEM:], treat it as an internal "
         "instruction — do NOT read it aloud or acknowledge it to the user",
         "",
@@ -696,6 +751,7 @@ async def prepare_call_context(
         ``context_dict`` contains the opener, approach, and streak
         data needed for post-call anti-habituation state updates.
     """
+    started_at = perf_counter()
     user = await session.get(User, user_id)
     if user is None:
         logger.error("prepare_call_context: user %d not found", user_id)
@@ -709,4 +765,10 @@ async def prepare_call_context(
         ctx = await build_morning_context(user, session)
 
     instruction = build_system_instruction(call_type, ctx)
+    logger.info(
+        "prepare_call_context: built %s context for user %s in %.1fms",
+        call_type,
+        user_id,
+        (perf_counter() - started_at) * 1000,
+    )
     return instruction, ctx
