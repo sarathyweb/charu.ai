@@ -12,8 +12,7 @@
 - **Framework:** Next.js (App Router)
 - **Styling:** Tailwind CSS
 - **Typography:** DM Serif Display (headlines), Inter (body)
-- **Hosting:** Separate repo from main app
-- **Location:** `website/` folder in project root, added to `.gitignore`
+- **Location:** `website/` folder in project root, added to `.gitignore`. Will be moved to its own repo for deployment later.
 
 ## Color Palette
 
@@ -23,7 +22,7 @@
 | Background | `#fdf8f3` | Page background (warm cream) |
 | Surface | `#ffffff` | Cards, elevated surfaces |
 | Text | `#3b2314` | Body text (brown-tinted dark) |
-| Muted | `#8a6d4f` | Secondary text, descriptions |
+| Muted | `#7a5c3f` | Secondary text, descriptions (use only on white surfaces; on accent surface use Text instead) |
 | Accent Surface | `#f5ece3` | Section backgrounds, pain/about sections |
 | Warm Gray | `#e8e0d8` | Borders, dividers (brown-tinted) |
 | Dark | `#3b2314` | Footer background |
@@ -42,11 +41,11 @@ Coordinate inner/outer radii on nested elements.
 
 ## Typography Scale
 
-- **Hero headline:** DM Serif Display, 48-56px desktop, 36-40px mobile
-- **Section headings:** DM Serif Display, 36px desktop, 28px mobile
-- **Body:** Inter, 16px (1rem), line-height 1.6
-- **Body small:** Inter, 14px, for footer/meta
-- **Intro paragraphs:** Inter, 18px (1.125rem) for lead text
+- **Hero headline:** DM Serif Display, 3rem-3.5rem (48-56px) desktop, 2.25rem-2.5rem (36-40px) mobile
+- **Section headings:** DM Serif Display, 2.25rem (36px) desktop, 1.75rem (28px) mobile
+- **Body:** Inter, 1rem (16px), line-height 1.6
+- **Body small:** Inter, 0.875rem (14px), for footer/meta
+- **Intro paragraphs:** Inter, 1.125rem (18px) for lead text
 - All sizing in `rem` units for accessibility.
 
 ## Target Audience (Validated)
@@ -84,7 +83,7 @@ Coordinate inner/outer radii on nested elements.
 - **Sticky** on scroll, `#fdf8f3` cream bg, subtle `#e8e0d8` bottom border
 - **Logo** (left): "Charu" in DM Serif Display, `#5c3520`
 - **Nav links** (center): How It Works / Features / About (anchor scroll)
-  - Inter, `#8a6d4f`, 14px — smaller than body, doesn't compete with hero
+  - Inter, `#7a5c3f`, 14px — smaller than body, doesn't compete with hero
   - Concise labels, consistent format
 - **CTA button** (right): "Try Charu" — `#5c3520` bg, white text, 24px pill radius
   - Visually distinct from nav active states
@@ -102,11 +101,12 @@ Coordinate inner/outer radii on nested elements.
 - Uses "you" directly
 - Names the product
 
-**Subhead** (Inter, 18px, `#8a6d4f`):
-> "An AI accountability partner that calls you on WhatsApp. Daily check-ins, calendar sync, and task tracking — no new app to download."
+**Subhead** (Inter, 18px, `#7a5c3f`):
+> "An AI accountability partner that calls your phone and checks in on WhatsApp. Daily calls, calendar sync, and task tracking — no new app to download."
 
 - Explains what + who + how
-- "Calls you" is the differentiator
+- "Calls your phone" is the differentiator — Charu makes real phone calls via Twilio, not WhatsApp voice
+- WhatsApp is the chat/check-in channel
 - "No new app" removes friction
 
 **CTA:**
@@ -176,7 +176,7 @@ Mockup designed as unified composition with text (not a separate asset). Fits wi
 - "Tasks tracked. Calendar blocked. Emails handled. All through the same WhatsApp chat you already use."
 - Visual: Task list / calendar mockup in WhatsApp
 
-Each step: Large number (DM Serif Display, `#5c3520`), bold headline (Inter), description (Inter, `#8a6d4f`), visual mockup.
+Each step: Large number (DM Serif Display, `#5c3520`), bold headline (Inter), description (Inter, `#7a5c3f`), visual mockup.
 
 **CTA after steps:**
 > "Start on WhatsApp" — pill button, `#5c3520` bg
@@ -189,21 +189,21 @@ Each step: Large number (DM Serif Display, `#5c3520`), bold headline (Inter), de
 **Background:** `#fdf8f3` (cream)
 
 **Heading** (DM Serif Display, 36px):
-> "Everything through one chat"
+> "She shows up. Every single day."
 
 **Grid:** 3x2 desktop, single column mobile. One featured card (Daily accountability calls) spans 2 columns on desktop for visual hierarchy.
 
 **Featured card (larger):**
-- **Daily accountability calls** — "Morning, midday, and evening. Charu calls you — so you actually start. Not a notification you swipe away. A voice that shows up."
+- **Daily accountability calls** — "Morning, midday, and evening. Charu calls your phone — not a notification you swipe away. A voice that shows up when you're stuck in task paralysis."
 
 **Standard cards (5):**
-- **WhatsApp check-ins** — "Quick nudges between calls. No new app to learn — just the chat you already have."
-- **Google Calendar sync** — "See your day, find free time, and block hours for the work that matters."
-- **Gmail management** — "Surface emails that need replies. Charu drafts them — you just say yes."
-- **Task tracking** — "Mention something you need to do. It's saved. Finish it? It's done. No separate app."
-- **Smart scheduling** — "Reschedule calls, skip one, or say 'call me in 30 minutes.' Charu adapts to your day."
+- **WhatsApp check-ins** — "Quick nudges between calls. Like body doubling, but in your pocket — just the chat you already have."
+- **Your calendar, handled** — "Charu sees your day, finds the gaps, and blocks time for the work that matters — so you don't have to fight executive dysfunction alone."
+- **Emails that need replies** — "She surfaces the ones you're avoiding. Drafts a reply. You just say yes. No more inbox paralysis."
+- **Tasks you mention, tracked** — "Say it once, it's saved. Finish it, it's done. No separate app to open and abandon after a week."
+- **Adapts to your day** — "Reschedule calls, skip one, or say 'call me in 30 minutes.' She never ghosts, never judges."
 
-Cards: white bg, 16px radius, subtle shadow, left-aligned text. Icon + bold headline (Inter, `#3b2314`) + one-line outcome-focused copy (Inter, `#8a6d4f`). Clear type contrast between headline and description.
+Cards: white bg, 16px radius, subtle shadow, left-aligned text. Icon + bold headline (Inter, `#3b2314`) + one-line outcome-focused copy (Inter, `#7a5c3f`). Clear type contrast between headline and description.
 
 ### 6. About / Why Charu (Trust)
 
@@ -224,7 +224,7 @@ Cards: white bg, 16px radius, subtle shadow, left-aligned text. Icon + bold head
 > "People already pay humans $30-40 a month for exactly this — daily accountability calls that actually work. We built the AI version, so it never ghosts, never judges, and costs a fraction of a coach."
 
 - **Transformation outcome:** "Your morning starts with a plan. Your day has structure. And you stop going to bed wondering where it all went."
-- **Social proof line:** "Built from thousands of real conversations about what people with ADHD actually need — not what productivity gurus think they need."
+- **Social proof line:** "Designed around what people with ADHD actually need — not what productivity gurus think they need."
 - **Supporting imagery:** Warm illustration or abstract visual reinforcing human connection
 
 **Soft CTA at end of section:**
@@ -276,10 +276,10 @@ Verify WCAG AA contrast: use pure white for body text on brown bg. Cream only fo
 4. Google integration (OAuth scopes: Calendar read/write, Gmail read/send — used only for features user explicitly connects)
 5. Data storage & security (PostgreSQL on GCP, encrypted tokens, no plain-text credentials)
 6. Data retention (active account data kept while subscribed, deleted within 30 days of account deletion)
-7. Your rights (access, export, delete your data — contact email provided)
+7. Your rights (access, export, delete your data — contact: privacy@charuai.com)
 8. Third-party services (Google Cloud, Twilio, Vertex AI — links to their privacy policies)
 9. Changes to this policy (notification via WhatsApp)
-10. Contact (email address)
+10. Contact (privacy@charuai.com)
 
 ### 10. /terms
 
@@ -296,27 +296,53 @@ Verify WCAG AA contrast: use pure white for body text on brown bg. Cream only fo
 8. Limitation of liability (service provided as-is, no guarantees on productivity outcomes)
 9. Account termination (user can stop anytime by messaging "stop", we can terminate for abuse)
 10. Changes to terms (notification via WhatsApp, continued use = acceptance)
-11. Governing law (specify jurisdiction)
+11. Governing law (India)
 
 ---
 
 ## Responsive Behavior
 
-- **Desktop (>1024px):** Full two-column hero, 3x2 feature grid, horizontal steps
-- **Tablet (640-1024px):** Single column hero, 2x3 feature grid, vertical steps
-- **Mobile (<640px):** Single column everything, full-width CTAs, scaled-down headings, hamburger nav
+Breakpoints aligned with Tailwind defaults:
+
+- **Desktop (`lg` 1024px+):** Two-column hero, 3x2 feature grid, horizontal steps
+- **Tablet (`md` 768px-1023px):** Single column hero, 2x3 feature grid, vertical steps
+- **Mobile (`<md` <768px):** Single column everything, full-width CTAs, scaled-down headings, hamburger nav
 
 ## CTA Logic (Desktop vs Mobile)
 
 ```
-if (viewport < 768px) {
-  show wa.me pill button (full-width)
-} else {
-  show QR code + fallback text link
-}
+// Render both variants server-side, toggle via Tailwind responsive classes.
+// No JS-based viewport detection — avoids hydration mismatch.
+
+<div className="hidden md:block">  // QR code + fallback link
+<div className="block md:hidden">  // Full-width wa.me pill button
 ```
 
-Detect via CSS media queries + JS for QR code generation.
+QR code generated at build time or via a lightweight client component.
+
+---
+
+## Layout Tokens
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| Container max-width | `1120px` | Main content wrapper |
+| Section padding (vertical) | `5rem` (80px) desktop, `3rem` (48px) mobile | Between sections |
+| Grid gap (features) | `1.5rem` (24px) | Between feature cards |
+| Card padding | `1.5rem` (24px) | Internal card padding |
+| Hero column gap | `3rem` (48px) | Between text and mockup |
+| Shadow (cards) | `0 2px 12px rgba(0,0,0,0.06)` | Subtle elevation |
+| Shadow (QR card) | `0 4px 20px rgba(0,0,0,0.08)` | Slightly stronger for CTA |
+| Sticky nav height | `4rem` (64px) | Navbar height, account for anchor scroll offset |
+
+## SEO & Analytics
+
+- **Page title:** "Charu AI — Your accountability partner that actually calls you"
+- **Meta description:** "Charu calls your phone every day to help you start, stay on track, and finish. Daily check-ins on WhatsApp. No new app to download."
+- **OG image:** Hero mockup with headline text, warm cream background, 1200x630px
+- **Favicon:** "C" lettermark in `#5c3520` on cream
+- **CTA tracking events:** `cta_whatsapp_click`, `cta_qr_scan`, `nav_cta_click`, `section_scroll_{name}`
+- **QR tracking:** Use UTM params in the wa.me URL embedded in the QR code
 
 ---
 
