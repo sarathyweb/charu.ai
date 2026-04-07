@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # HMAC secret for signing WebSocket stream tokens
     STREAM_TOKEN_SECRET: str = "change-me-in-production"
 
+    # Google Cloud location override for Gemini Live API (requires regional endpoint)
+    GOOGLE_CLOUD_LIVE_LOCATION: str = "us-east1"
+
     # Base URL for Twilio webhook signature validation (proxy-safe)
     WEBHOOK_BASE_URL: str
 

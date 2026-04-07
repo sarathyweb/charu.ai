@@ -100,7 +100,7 @@ async def assemble_pipeline(
 
     llm = GeminiLiveVertexLLMService(
         project_id=settings.GOOGLE_CLOUD_PROJECT,
-        location=settings.GOOGLE_CLOUD_LOCATION,
+        location=settings.GOOGLE_CLOUD_LIVE_LOCATION,
         settings=GeminiLiveVertexLLMService.Settings(
             model="gemini-live-2.5-flash-native-audio",
             system_instruction=system_instruction,
