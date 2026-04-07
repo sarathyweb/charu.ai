@@ -39,6 +39,7 @@ from app.api.chat import router as chat_router
 from app.api.google_oauth import router as google_oauth_router
 from app.api.health import router as health_router
 from app.api.voice import router as voice_router
+from app.api.dashboard import router as dashboard_router
 from app.api.whatsapp import router as whatsapp_router
 from app.config import get_settings
 from app.db import create_db_tables
@@ -115,3 +116,4 @@ app.include_router(chat_router)
 app.include_router(whatsapp_router)
 app.include_router(google_oauth_router)
 app.include_router(voice_router)
+app.include_router(dashboard_router)

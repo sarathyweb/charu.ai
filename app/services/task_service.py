@@ -158,6 +158,29 @@ class TaskService:
         return list(result.all())
 
     # ------------------------------------------------------------------
+    # list_completed_tasks
+    # ------------------------------------------------------------------
+
+    async def list_completed_tasks(
+        self,
+        user_id: int,
+        limit: int = 50,
+    ) -> list[Task]:
+        """Return completed tasks ordered by completed_at DESC."""
+        result = await self.session.exec(
+            select(Task)
+            .where(
+                Task.user_id == user_id,
+                Task.status == TaskStatus.COMPLETED.value,
+            )
+            .order_by(
+                Task.completed_at.desc(),  # type: ignore[union-attr]
+            )
+            .limit(limit)
+        )
+        return list(result.all())
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

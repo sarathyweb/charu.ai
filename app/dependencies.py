@@ -10,6 +10,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db import async_session_factory
 from app.services.agent_service import AgentService
+from app.services.call_window_service import CallWindowService
+from app.services.task_service import TaskService
 from app.services.user_service import UserService
 
 
@@ -39,6 +41,20 @@ def get_user_service(
 ) -> UserService:
     """Provide a UserService wired to the current request's DB session."""
     return UserService(session)
+
+
+def get_task_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> TaskService:
+    """Provide a TaskService wired to the current request's DB session."""
+    return TaskService(session)
+
+
+def get_call_window_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> CallWindowService:
+    """Provide a CallWindowService wired to the current request's DB session."""
+    return CallWindowService(session)
 
 
 def get_agent_service(
