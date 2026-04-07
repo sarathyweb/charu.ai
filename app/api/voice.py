@@ -454,8 +454,6 @@ async def voice_stream(websocket: WebSocket) -> None:
         #   TwilioFrameSerializer → TranscriptProcessor → CallTimer
         #   → GeminiLiveLLMService → transport output
         # ------------------------------------------------------------------
-        from pipecat.pipeline.runner import PipelineRunner
-
         from app.voice.pipeline import CallConfig, assemble_pipeline
 
         pipeline_config = CallConfig(
@@ -489,7 +487,7 @@ async def voice_stream(websocket: WebSocket) -> None:
 
             # Blocks until the call ends (user hangs up, timer expires,
             # or EndFrame is pushed).
-            runner = PipelineRunner(handle_sigint=False)
+            runner = result.runner
             await runner.run(result.task)
 
             # Mark disconnection for elapsed-time calculation

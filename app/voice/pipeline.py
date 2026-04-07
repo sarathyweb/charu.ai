@@ -2,8 +2,12 @@
 
 Assembles a per-call ``PipelineTask`` with:
   - ``FastAPIWebsocketTransport`` + ``TwilioFrameSerializer`` (µ-law ↔ PCM)
-  - ``GeminiLiveVertexLLMService`` (speech-to-speech, Aoede voice, affective dialog)
+  - ``GeminiLiveVertexLLMService`` (speech-to-speech, native audio)
+  - ``LLMContextAggregatorPair`` for context management
   - ``CallTimerProcessor`` for duration enforcement
+
+Based on the official Pipecat Gemini Live + Twilio example:
+  https://github.com/pipecat-ai/pipecat-examples/tree/main/gemini-live-starters/phone-bot
 
 Design references:
   - Design §2: Voice Call Pipeline
@@ -19,10 +23,16 @@ from dataclasses import dataclass
 
 from fastapi import WebSocket
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.google.gemini_live import GeminiLiveVertexLLMService
 from pipecat.services.google.gemini_live.llm import GeminiVADParams
@@ -59,6 +69,7 @@ class PipelineResult:
     """Returned after the pipeline finishes running."""
 
     task: PipelineTask
+    runner: PipelineRunner
     transcript: TranscriptCollector
 
 
@@ -68,9 +79,9 @@ async def assemble_pipeline(
     websocket: WebSocket,
     config: CallConfig,
 ) -> PipelineResult:
-    """Build and return a ready-to-run ``PipelineTask``.
+    """Build and return a ready-to-run pipeline.
 
-    The caller is responsible for ``await result.task.run()``.
+    The caller is responsible for ``await result.runner.run(result.task)``.
     """
     settings = get_settings()
 
@@ -87,13 +98,14 @@ async def assemble_pipeline(
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
         params=FastAPIWebsocketParams(
+            audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=False,
             serializer=serializer,
         ),
     )
 
-    # ── 3. Gemini Live LLM (speech-to-speech) ────────────────────────
+    # ── 3. Gemini Live LLM (speech-to-speech via Vertex AI) ─────────
     system_instruction = config.system_instruction or _default_instruction(
         config.call_type
     )
@@ -112,65 +124,75 @@ async def assemble_pipeline(
         ),
     )
 
-    # ── 4. Register voice tools and create context ───────────────────
+    # ── 4. Register voice tools ──────────────────────────────────────
     tools = register_voice_tools(
         llm,
         call_log_id=config.call_log_id,
         user_id=config.user_id,
     )
 
+    # ── 5. Context + aggregators (following official Pipecat pattern) ─
     context = LLMContext(tools=tools)
-
-    # ── 5. Transcript collection ─────────────────────────────────────
-    collector = TranscriptCollector()
-
-    # Wire transcript collection via aggregator events
-    # (TranscriptProcessor is deprecated in pipecat 0.0.99+)
-    async def _on_user_turn(aggregator, text):
-        collector.add_user_entry(text)
-
-    async def _on_assistant_turn(aggregator, text):
-        collector.add_assistant_entry(text)
-
-    # ── 6. Call timer ────────────────────────────────────────────────
-    call_timer = create_call_timer(config.call_type)
-
-    # ── 7. Assemble pipeline ─────────────────────────────────────────
-    #
-    # For Gemini Live (speech-to-speech), the LLM handles audio
-    # directly. We use a minimal pipeline:
-    #   transport.input → call_timer → llm → transport.output
-    #
-    pipeline = Pipeline(
-        [
-            transport.input(),
-            call_timer,
-            llm,
-            transport.output(),
-        ]
-    )
-
-    # ── 8. Pipeline task ─────────────────────────────────────────────
-    task = PipelineTask(
-        pipeline,
-        params=PipelineParams(
-            audio_in_sample_rate=16000,
-            audio_out_sample_rate=24000,
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
         ),
     )
 
-    return PipelineResult(task=task, transcript=collector)
+    # ── 6. Transcript collection via aggregator events ───────────────
+    collector = TranscriptCollector()
+
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message):
+        collector.add_user_entry(message.content)
+
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message):
+        collector.add_assistant_entry(message.content)
+
+    # ── 7. Call timer ────────────────────────────────────────────────
+    call_timer = create_call_timer(config.call_type)
+
+    # ── 8. Assemble pipeline ─────────────────────────────────────────
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            user_aggregator,
+            call_timer,
+            llm,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+
+    # ── 9. Pipeline task ─────────────────────────────────────────────
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
+
+    # Kick off the conversation when the transport connects
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(
+            "voice/pipeline: client connected for call_log_id=%d",
+            config.call_log_id,
+        )
+        await task.queue_frames([LLMRunFrame()])
+
+    runner = PipelineRunner(handle_sigint=False)
+
+    return PipelineResult(task=task, runner=runner, transcript=collector)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 def _default_instruction(call_type: str) -> str:
-    """Return a minimal default system instruction.
-
-    Pre-call context injection (task 14.5) will replace this with a
-    fully personalised instruction.  This fallback ensures the pipeline
-    works even before that task is implemented.
-    """
+    """Return a minimal default system instruction."""
     if call_type == "evening":
         return (
             "You are Charu, a warm and supportive accountability companion. "
