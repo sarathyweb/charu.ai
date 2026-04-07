@@ -33,6 +33,7 @@ Thumbs.db
 secrets/
 docs/
 uv.lock
+.superpowers/
 .superpowers/**/state/server.log
 .superpowers/**/state/server.pid
 
