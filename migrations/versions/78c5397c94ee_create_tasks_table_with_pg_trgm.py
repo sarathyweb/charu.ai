@@ -76,4 +76,5 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS idx_tasks_title_trgm")
     op.drop_index(op.f("ix_tasks_user_id"), table_name="tasks")
     op.drop_table("tasks")
-    op.execute("DROP EXTENSION IF EXISTS pg_trgm")
+    # pg_trgm extension is owned by the superuser; skip dropping it.
+    # op.execute("DROP EXTENSION IF EXISTS pg_trgm")
