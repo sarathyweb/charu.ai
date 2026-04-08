@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL = "gemini-3-flash-preview"
+MODEL = "gemini-3.1-pro-preview"
 
 _GENERATION_CONFIG = types.GenerateContentConfig(
     temperature=0.4,

@@ -150,7 +150,7 @@ def _block_agent_before_onboarding(
 # ---------------------------------------------------------------------------
 task_manager_agent = Agent(
     name="task_manager",
-    model="gemini-3-flash-preview",
+    model="gemini-3.1-pro-preview",
     description=(
         "Handles task management: creating, listing, updating, and completing tasks. "
         "Only available after onboarding is complete."
@@ -295,7 +295,7 @@ documentation, or anything that benefits from up-to-date web results.
 # ---------------------------------------------------------------------------
 root_agent = Agent(
     name="productivity_assistant",
-    model="gemini-3-flash-preview",
+    model="gemini-3.1-pro-preview",
     description="Main Charu AI assistant that coordinates onboarding and daily accountability.",
     instruction=_ROOT_INSTRUCTION,
     sub_agents=[onboarding_agent, task_manager_agent],
