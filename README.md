@@ -75,7 +75,7 @@ uv run celery -A app.celery_app worker --loglevel=info
 uv run celery -A app.celery_app beat -S redbeat.RedBeatScheduler --loglevel=info
 ```
 
-For WhatsApp webhook development, use a Cloudflare Tunnel — see `docs/cloudflare-tunnel-setup.md`.
+For WhatsApp webhook development, use a Cloudflare Tunnel to expose your local server.
 
 ### Environment Variables
 
@@ -109,20 +109,7 @@ Property-based tests use [Hypothesis](https://hypothesis.readthedocs.io/). Test 
 
 ## Production Deployment
 
-Full deployment guide: `docs/deployment.md`
-
 Runs on a Linux VPS (Ubuntu 24.04) with Nginx, systemd, PostgreSQL, and Redis. Three systemd services: `charu-web` (Uvicorn), `charu-worker` (Celery), `charu-beat` (Celery Beat).
-
-## Setup Guides
-
-| Guide | Description |
-|---|---|
-| `docs/deployment.md` | Full production deployment (VPS, Nginx, systemd, TLS) |
-| `docs/firebase-setup.md` | Firebase project + Phone auth setup |
-| `docs/google-oauth-setup.md` | Google OAuth for Calendar + Gmail |
-| `docs/twilio-whatsapp-setup.md` | Twilio WhatsApp sender + webhook config |
-| `docs/twilio-voice-setup.md` | Twilio voice number + geo permissions + Media Streams |
-| `docs/cloudflare-tunnel-setup.md` | Cloudflare Tunnel for local dev webhooks |
 
 ## Project Structure
 
@@ -140,5 +127,4 @@ app/
 └── celery_app.py               ← Celery config
 migrations/                     ← Alembic migrations
 tests/                          ← Unit + property-based tests
-docs/                           ← Setup and deployment guides
 ```
