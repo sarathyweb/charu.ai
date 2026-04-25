@@ -120,7 +120,7 @@ async def add_call_window(
                     }
 
             try:
-                window = await cw_svc.save_call_window(
+                await cw_svc.save_call_window(
                     user_id=user.id,
                     window_type=window_type,
                     start_time=start,

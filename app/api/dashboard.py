@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import select, func
+from fastapi.responses import RedirectResponse
+from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth.firebase import get_firebase_user
+from app.config import get_settings
 from app.dependencies import (
     get_call_window_service,
     get_db_session,
@@ -26,10 +29,12 @@ from app.dependencies import (
     get_user_service,
 )
 from app.models.call_log import CallLog
-from app.models.enums import CallLogStatus, TaskStatus
+from app.models.call_window import CallWindow
+from app.models.enums import CallLogStatus, CallType, OutcomeConfidence
 from app.models.schemas import FirebasePrincipal
 from app.models.user import User
 from app.services.call_window_service import CallWindowService
+from app.services.ephemeral_token_service import create_ephemeral_token
 from app.services.task_service import TaskService
 from app.services.user_service import UserService
 
@@ -43,6 +48,19 @@ router = APIRouter()
 
 CALENDAR_SCOPES = {"https://www.googleapis.com/auth/calendar"}
 GMAIL_SCOPES = {"https://www.googleapis.com/auth/gmail.modify"}
+SCHEDULED_CALL_TYPES = (
+    CallType.MORNING.value,
+    CallType.AFTERNOON.value,
+    CallType.EVENING.value,
+)
+GOAL_CALL_TYPES = (
+    CallType.MORNING.value,
+    CallType.AFTERNOON.value,
+)
+GOAL_SUCCESS_CONFIDENCES = (
+    OutcomeConfidence.CLEAR.value,
+    OutcomeConfidence.PARTIAL.value,
+)
 
 
 async def _resolve_user(
@@ -56,9 +74,127 @@ async def _resolve_user(
     return user
 
 
+def _today_for_user(user: User) -> date:
+    """Return today's date in the user's timezone, falling back to UTC."""
+    timezone_name = user.timezone or "UTC"
+    try:
+        tzinfo = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        logger.warning(
+            "Invalid timezone %r for user_id=%s; falling back to UTC",
+            timezone_name,
+            user.id,
+        )
+        tzinfo = timezone.utc
+    return datetime.now(tzinfo).date()
+
+
+async def _completed_dates(
+    session: AsyncSession,
+    user_id: int,
+    today: date,
+) -> set[date]:
+    """Return all historical dates where the user completed at least one call."""
+    rows = await session.exec(
+        select(CallLog.call_date)
+        .where(
+            CallLog.user_id == user_id,
+            CallLog.status == CallLogStatus.COMPLETED.value,
+            CallLog.call_date <= today,
+        )
+        .group_by(CallLog.call_date)
+        .order_by(CallLog.call_date)
+    )
+    return set(rows.all())
+
+
+def _calculate_streaks(completed_dates: set[date], today: date) -> tuple[int, int]:
+    """Calculate current and best daily completion streaks."""
+    current_streak = 0
+    check_date = today
+    while check_date in completed_dates:
+        current_streak += 1
+        check_date -= timedelta(days=1)
+
+    best_streak = 0
+    run_length = 0
+    previous_date: date | None = None
+    for completed_date in sorted(completed_dates):
+        if previous_date is not None and completed_date == previous_date + timedelta(
+            days=1
+        ):
+            run_length += 1
+        else:
+            run_length = 1
+        best_streak = max(best_streak, run_length)
+        previous_date = completed_date
+
+    return current_streak, best_streak
+
+
+async def _count_completed_scheduled_calls(
+    session: AsyncSession,
+    user_id: int,
+    start_date: date,
+    end_date: date,
+) -> int:
+    """Count completed scheduled accountability calls in [start_date, end_date)."""
+    result = await session.exec(
+        select(func.count(CallLog.id)).where(
+            CallLog.user_id == user_id,
+            CallLog.status == CallLogStatus.COMPLETED.value,
+            CallLog.call_type.in_(SCHEDULED_CALL_TYPES),
+            CallLog.call_date >= start_date,
+            CallLog.call_date < end_date,
+        )
+    )
+    return result.one()
+
+
+async def _count_active_call_windows(session: AsyncSession, user_id: int) -> int:
+    """Count active scheduled call windows for the user."""
+    result = await session.exec(
+        select(func.count(CallWindow.id)).where(
+            CallWindow.user_id == user_id,
+            CallWindow.is_active.is_(True),
+        )
+    )
+    return result.one()
+
+
+async def _goal_completion_stats(
+    session: AsyncSession,
+    user_id: int,
+    start_date: date,
+    end_date: date,
+) -> tuple[int, int, int]:
+    """Return total goal-capable calls, successful calls, and completion pct."""
+    base_filters = (
+        CallLog.user_id == user_id,
+        CallLog.status == CallLogStatus.COMPLETED.value,
+        CallLog.call_type.in_(GOAL_CALL_TYPES),
+        CallLog.call_date >= start_date,
+        CallLog.call_date < end_date,
+    )
+    total_result = await session.exec(
+        select(func.count(CallLog.id)).where(*base_filters)
+    )
+    success_result = await session.exec(
+        select(func.count(CallLog.id)).where(
+            *base_filters,
+            CallLog.call_outcome_confidence.in_(GOAL_SUCCESS_CONFIDENCES),
+        )
+    )
+    total = total_result.one()
+    successes = success_result.one()
+    pct = round((successes / total * 100) if total > 0 else 0)
+    return total, successes, pct
+
+
 # ---------------------------------------------------------------------------
 # GET /api/progress
 # ---------------------------------------------------------------------------
+
 
 @router.get("/api/progress")
 async def get_progress(
@@ -68,7 +204,7 @@ async def get_progress(
 ):
     """Return progress stats: streak, weekly summary, heatmap, goal completion."""
     user = await _resolve_user(principal, user_service)
-    today = date.today()
+    today = _today_for_user(user)
 
     # --- Heatmap: last 84 days (12 weeks) ---
     heatmap_start = today - timedelta(days=83)
@@ -102,88 +238,64 @@ async def get_progress(
             level = 4
         heatmap.append({"date": d.isoformat(), "level": level})
 
-    # --- Current streak ---
-    streak = 0
-    check_date = today
-    while True:
-        if completed_by_date.get(check_date, 0) > 0:
-            streak += 1
-            check_date -= timedelta(days=1)
-        else:
-            break
-
-    # --- Best streak (from heatmap window) ---
-    best_streak = 0
-    current_run = 0
-    for i in range(84):
-        d = heatmap_start + timedelta(days=i)
-        if completed_by_date.get(d, 0) > 0:
-            current_run += 1
-            best_streak = max(best_streak, current_run)
-        else:
-            current_run = 0
+    # --- Streaks: all history, not just the 84-day heatmap window ---
+    all_completed_dates = await _completed_dates(session, user.id, today)
+    streak, best_streak = _calculate_streaks(all_completed_dates, today)
 
     # --- This week stats ---
     week_start = today - timedelta(days=today.weekday())  # Monday
     prev_week_start = week_start - timedelta(days=7)
+    tomorrow = today + timedelta(days=1)
 
-    this_week_calls = sum(
-        1 for d, c in completed_by_date.items()
-        if week_start <= d <= today and c > 0
+    this_week_calls = await _count_completed_scheduled_calls(
+        session,
+        user.id,
+        week_start,
+        tomorrow,
     )
-    prev_week_calls = sum(
-        1 for d, c in completed_by_date.items()
-        if prev_week_start <= d < week_start and c > 0
+    prev_week_calls = await _count_completed_scheduled_calls(
+        session,
+        user.id,
+        prev_week_start,
+        week_start,
     )
+    active_call_windows = await _count_active_call_windows(session, user.id)
+    weekly_call_total = active_call_windows * 7
 
     # --- Goal completion ---
-    # Count calls with a goal set vs calls completed this week
-    this_week_goals_result = await session.exec(
-        select(
-            func.count().label("total"),
-            func.count(CallLog.goal).label("with_goal"),
-        )
-        .where(
-            CallLog.user_id == user.id,
-            CallLog.status == CallLogStatus.COMPLETED.value,
-            CallLog.call_date >= week_start,
-        )
+    _, goal_successes, goal_pct = await _goal_completion_stats(
+        session,
+        user.id,
+        week_start,
+        tomorrow,
     )
-    goals_row = this_week_goals_result.first()
-    total_calls_week = goals_row[0] if goals_row else 0
-    goals_set = goals_row[1] if goals_row else 0
-    goal_pct = round((goals_set / total_calls_week * 100) if total_calls_week > 0 else 0)
-
-    prev_week_goals_result = await session.exec(
-        select(
-            func.count().label("total"),
-            func.count(CallLog.goal).label("with_goal"),
-        )
-        .where(
-            CallLog.user_id == user.id,
-            CallLog.status == CallLogStatus.COMPLETED.value,
-            CallLog.call_date >= prev_week_start,
-            CallLog.call_date < week_start,
-        )
+    _, _, prev_goal_pct = await _goal_completion_stats(
+        session,
+        user.id,
+        prev_week_start,
+        week_start,
     )
-    prev_goals_row = prev_week_goals_result.first()
-    prev_total = prev_goals_row[0] if prev_goals_row else 0
-    prev_goals = prev_goals_row[1] if prev_goals_row else 0
-    prev_goal_pct = round((prev_goals / prev_total * 100) if prev_total > 0 else 0)
 
     # --- Weekly summary text ---
+    if this_week_calls > prev_week_calls:
+        trend_text = f" - up from {prev_week_calls}"
+    elif this_week_calls == prev_week_calls:
+        trend_text = " - same as"
+    else:
+        trend_text = f" - down from {prev_week_calls}"
+
     summary = (
-        f"You completed {this_week_calls} out of 7 calls this week"
-        f"{f' — up from {prev_week_calls}' if this_week_calls > prev_week_calls else f' — same as'
-          if this_week_calls == prev_week_calls else f' — down from {prev_week_calls}'} last week. "
-        f"You set goals on {goals_set} day{'s' if goals_set != 1 else ''}."
+        f"You completed {this_week_calls} out of {weekly_call_total} calls this week"
+        f"{trend_text} last week. "
+        f"You met or partially met goals on {goal_successes} call"
+        f"{'s' if goal_successes != 1 else ''}."
     )
 
     return {
         "streak": {"current": streak, "best": best_streak},
         "week": {
             "calls_completed": this_week_calls,
-            "calls_total": 7,
+            "calls_total": weekly_call_total,
             "prev_calls_completed": prev_week_calls,
         },
         "goals": {
@@ -198,6 +310,7 @@ async def get_progress(
 # ---------------------------------------------------------------------------
 # GET /api/tasks
 # ---------------------------------------------------------------------------
+
 
 @router.get("/api/tasks")
 async def get_tasks(
@@ -234,6 +347,7 @@ async def get_tasks(
 # GET /api/call-windows
 # ---------------------------------------------------------------------------
 
+
 @router.get("/api/call-windows")
 async def get_call_windows(
     principal: FirebasePrincipal = Depends(get_firebase_user),
@@ -248,7 +362,9 @@ async def get_call_windows(
         "windows": [
             {
                 "type": w.window_type,
-                "start_time": w.start_time.strftime("%-I:%M %p") if w.start_time else None,
+                "start_time": w.start_time.strftime("%-I:%M %p")
+                if w.start_time
+                else None,
                 "end_time": w.end_time.strftime("%-I:%M %p") if w.end_time else None,
                 "timezone": user.timezone or "UTC",
                 "is_active": w.is_active,
@@ -261,6 +377,7 @@ async def get_call_windows(
 # ---------------------------------------------------------------------------
 # GET /api/user/profile
 # ---------------------------------------------------------------------------
+
 
 @router.get("/api/user/profile")
 async def get_user_profile(
@@ -280,6 +397,7 @@ async def get_user_profile(
 # ---------------------------------------------------------------------------
 # GET /api/integrations
 # ---------------------------------------------------------------------------
+
 
 @router.get("/api/integrations")
 async def get_integrations(
@@ -301,7 +419,8 @@ async def get_integrations(
     if has_refresh:
         try:
             from app.services.google_oauth_service import build_google_credentials
-            creds = build_google_credentials(
+
+            build_google_credentials(
                 access_token_encrypted=user.google_access_token_encrypted,
                 refresh_token_encrypted=user.google_refresh_token_encrypted,
                 token_expiry=user.google_token_expiry,
@@ -313,16 +432,20 @@ async def get_integrations(
 
     integrations = []
     if calendar_connected or gmail_connected or has_refresh:
-        integrations.append({
-            "service": "google_calendar",
-            "connected": calendar_connected,
-            "email": google_email,
-        })
-        integrations.append({
-            "service": "gmail",
-            "connected": gmail_connected,
-            "email": google_email,
-        })
+        integrations.append(
+            {
+                "service": "google_calendar",
+                "connected": calendar_connected,
+                "email": google_email,
+            }
+        )
+        integrations.append(
+            {
+                "service": "gmail",
+                "connected": gmail_connected,
+                "email": google_email,
+            }
+        )
     else:
         integrations.append({"service": "google_calendar", "connected": False})
         integrations.append({"service": "gmail", "connected": False})
@@ -334,9 +457,14 @@ async def get_integrations(
 # GET /api/integrations/{service}/connect — start OAuth from dashboard
 # ---------------------------------------------------------------------------
 
+
 @router.get("/api/integrations/{service}/connect")
 async def connect_integration(
     service: str,
+    redirect: bool = Query(
+        True,
+        description="Return a 302 redirect when true, otherwise return the OAuth URL as JSON.",
+    ),
     principal: FirebasePrincipal = Depends(get_firebase_user),
     user_service: UserService = Depends(get_user_service),
 ):
@@ -354,10 +482,6 @@ async def connect_integration(
     oauth_service = "calendar" if service == "google_calendar" else "gmail"
 
     # Create ephemeral token for the existing OAuth flow
-    from app.services.ephemeral_token_service import create_ephemeral_token
-    from app.config import get_settings
-    from fastapi.responses import RedirectResponse
-
     token = await create_ephemeral_token(
         user_id=user.id,
         service=oauth_service,
@@ -366,12 +490,16 @@ async def connect_integration(
     settings = get_settings()
     start_url = f"{settings.WEBHOOK_BASE_URL}/auth/google/start?token={token}"
 
+    if not redirect:
+        return {"url": start_url}
+
     return RedirectResponse(url=start_url, status_code=302)
 
 
 # ---------------------------------------------------------------------------
 # DELETE /api/integrations/{service}/disconnect
 # ---------------------------------------------------------------------------
+
 
 @router.delete("/api/integrations/{service}/disconnect")
 async def disconnect_integration(

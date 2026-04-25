@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, Response, WebSocket, WebSocketDisconnect
 
 from app.auth.twilio import verify_twilio_signature
 from app.config import get_settings
@@ -33,10 +33,7 @@ from app.services.call_log_service import (
     InvalidTransitionError,
     StaleVersionError,
 )
-from app.services.outbound_message_service import (
-    OutboundMessageService,
-    missed_call_dedup_key,
-)
+from app.services.outbound_message_service import OutboundMessageService
 from app.services.scheduling_helpers import MAX_RETRIES, RETRY_DELAY_SECONDS
 from app.services.whatsapp_service import WhatsAppService, build_missed_call_params
 from app.utils import verify_stream_token
@@ -528,17 +525,6 @@ async def voice_stream(websocket: WebSocket) -> None:
                 token_call_log_id,
             )
 
-        except WebSocketDisconnect:
-            logger.info(
-                "voice/stream: early disconnect for call_log_id=%s",
-                token_call_log_id if token_call_log_id is not None else "unknown",
-            )
-        except Exception:
-            pipeline_failed = True
-            logger.exception(
-                "voice/stream: unexpected error for call_log_id=%s",
-                token_call_log_id if token_call_log_id is not None else "unknown",
-            )
     finally:
         # ------------------------------------------------------------------
         # Step 8: Cleanup — early disconnect detection and post-call actions

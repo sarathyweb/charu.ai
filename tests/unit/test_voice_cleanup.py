@@ -15,9 +15,7 @@ Requirements: 5, 13, 14.5
 from __future__ import annotations
 
 import json
-import os
-from datetime import date, datetime, timezone
-from pathlib import Path
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -116,8 +114,6 @@ class TestPostCallCleanup:
 
         mock_svc = AsyncMock()
         mock_svc.update_status = AsyncMock(return_value=mock_call_log)
-
-        mock_recap = AsyncMock()
 
         with (
             patch("app.voice.cleanup.TRANSCRIPT_DIR", str(tmp_path)),
@@ -242,10 +238,12 @@ class TestPostCallCleanup:
             # For the CallLog session
             mock_session_cl = AsyncMock()
             mock_session_cl.get = AsyncMock(return_value=mock_cl)
+            mock_session_cl.add = MagicMock()
 
             # For the User session (anti-habituation)
             mock_session_user = AsyncMock()
             mock_session_user.get = AsyncMock(return_value=mock_user)
+            mock_session_user.add = MagicMock()
 
             call_count = 0
 

@@ -14,13 +14,18 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, time, timezone
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from google.adk.tools import ToolContext
 from google.adk.tools.base_tool import BaseTool
 
 from app.db import async_session_factory
 from app.services.user_service import UserService
+
+if TYPE_CHECKING:
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +247,7 @@ async def save_call_window(
             try:
                 # save_call_window validates, upserts the window, hard-deletes
                 # future planned entries if times changed, and commits.
-                window = await cw_svc.save_call_window(
+                await cw_svc.save_call_window(
                     user_id=user.id,
                     window_type=window_type,
                     start_time=start,

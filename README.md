@@ -1,14 +1,14 @@
 # Charu AI
 
-AI-powered productivity assistant that conducts accountability calls, manages tasks, goals, calendar, and email — accessible via WhatsApp, web chat, and voice calls.
+AI-powered productivity assistant that conducts accountability calls, captures tasks and goals, and helps with calendar and email follow-up through WhatsApp, backend chat APIs, dashboard pages, and voice calls.
 
 ## How It Works
 
-Charu places scheduled voice calls (morning, afternoon, evening) to help users set daily goals, review progress, and stay accountable. Between calls, users interact via WhatsApp or web chat to manage tasks, calendar events, and emails.
+Charu places scheduled voice calls (morning, afternoon, evening) to help users set daily goals, review progress, and stay accountable. Between calls, users can use WhatsApp or the authenticated chat API for task capture, call management, calendar context, and Gmail reply assistance.
 
 ```
 User ──► WhatsApp ──► Twilio webhook ──► FastAPI ──► Google ADK (Gemini 3.1 Pro)
-User ──► Web chat ──► FastAPI (REST/SSE/WebSocket) ──► Google ADK
+User ──► Authenticated chat API ──► FastAPI REST ──► Google ADK
 User ◄── Voice call ◄── Twilio Media Streams ◄── Pipecat + Gemini Live
 ```
 
@@ -20,17 +20,17 @@ User ◄── Voice call ◄── Twilio Media Streams ◄── Pipecat + Gem
 - SQLModel + PostgreSQL (data), Redis (cache, task queue, ephemeral tokens)
 - Firebase Phone/OTP auth (web), Twilio signature validation (WhatsApp)
 - Google OAuth 2.0 for Calendar and Gmail integration
-- Next.js frontend (standalone output)
+- Next.js dashboard frontend (standalone output)
 
 ## Features
 
 - Scheduled accountability voice calls with AI (morning goals, afternoon check-in, evening reflection)
 - On-demand callback requests
-- Task management with fuzzy matching (create, complete, update, delete, snooze)
-- Goal tracking (create, complete, abandon, list)
-- Google Calendar integration (read, create, update, delete events, time blocking)
-- Gmail integration (check, reply with draft review, compose, search, archive)
-- Web search (built-in Google Search grounding on both text and voice agents)
+- Task management with fuzzy matching (create, complete, list pending/completed)
+- Goal capture during accountability calls
+- Google Calendar integration (read today's events, find available gaps, create time blocks)
+- Gmail integration (check emails needing reply, draft reviewed replies, send approved replies)
+- Web search through the ADK text agent
 - Post-call WhatsApp recaps and midday check-ins
 - Weekly progress summaries
 - Dashboard with streaks, heatmap, and goal completion stats
