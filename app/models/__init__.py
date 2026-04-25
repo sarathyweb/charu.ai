@@ -8,6 +8,7 @@ from app.models.enums import (
     CallLogStatus,
     CallType,
     DraftStatus,
+    GoalStatus,
     OccurrenceKind,
     OutboundMessageStatus,
     OutcomeConfidence,
@@ -15,6 +16,7 @@ from app.models.enums import (
     TaskStatus,
     WindowType,
 )
+from app.models.goal import Goal
 from app.models.mixins import TimestampMixin
 from app.models.outbound_message import OutboundMessage
 from app.models.processed_message import ProcessedMessage
@@ -41,6 +43,8 @@ __all__ = [
     "DraftStatus",
     "EmailDraftState",
     "FirebasePrincipal",
+    "Goal",
+    "GoalStatus",
     "OccurrenceKind",
     "OutboundMessage",
     "OutboundMessageStatus",

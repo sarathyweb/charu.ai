@@ -2,7 +2,7 @@
 
 Generated: 2026-04-25
 
-This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, and four subagent reviews. Checked items are implemented in the codebase. Unchecked items are partial, missing, or need verification before they should be treated as production-complete.
+This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, and multiple subagent reviews. Checked items are implemented in the codebase. Unchecked items are partial, missing, or need verification before they should be treated as production-complete.
 
 ## Audit Sources
 
@@ -12,7 +12,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Reviewed frontend surface: `website`
 - [x] Reviewed test coverage under `tests`
 - [x] Used subagents for documentation/planning, agents/voice, backend services/API/tasks/models, and tests
-- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`
+- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`
 
 ## Implemented / Working Features
 
@@ -27,14 +27,14 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Onboarding service persists name, timezone, wake/sleep preferences, WhatsApp opt-in, and call windows.
 - [x] User preference hydration and write-through tools exist for onboarding and productivity context.
 - [x] Call-window model, service, validation, and ADK call-window tools exist.
-- [x] Baseline task management exists: save task, fuzzy duplicate detection, complete task by title, list pending tasks, and list completed tasks.
+- [x] Task management exists: save task, fuzzy duplicate detection, complete task by title, list pending tasks, update, delete, snooze, unsnooze, and list completed tasks.
 - [x] Task model and pg_trgm migration exist.
 - [x] Core call/accountability system exists: `CallWindow`, `CallLog`, scheduling, dispatch, retries, Twilio status callbacks, AMD handling, and call management service.
 - [x] Celery call planner, catch-up scheduling, due-call dispatcher, trigger-call task, and stale-call sweeper exist.
 - [x] Twilio voice stream endpoint exists with stream token validation and call-context creation.
 - [x] Voice early-disconnect detection is wired in the endpoint.
 - [x] Pipecat/Gemini Live voice pipeline exists with transcript capture, call timer, tool registration, and cleanup hooks.
-- [x] Voice tools exist for saving morning/afternoon call outcomes, evening call outcomes, saving tasks, completing tasks, scheduling callbacks, skipping calls, rescheduling calls, getting the next call, and canceling today's calls.
+- [x] Voice tools exist for saving morning/afternoon call outcomes, evening call outcomes, saving tasks, listing pending tasks, updating tasks, deleting tasks, snoozing tasks, unsnoozing tasks, completing tasks, creating/listing/updating/completing/abandoning/deleting goals, scheduling callbacks, skipping calls, rescheduling calls, getting the next call, and canceling today's calls.
 - [x] Structured call-outcome persistence exists for morning, afternoon, evening, and on-demand call types.
 - [x] Transcript storage and retention metadata exist.
 - [x] Post-call cleanup exists for call state finalization, transcript persistence, recap dispatch, draft-review dispatch attempt, and anti-habituation update.
@@ -51,7 +51,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Gmail reply workflow exists with draft creation/update, WhatsApp review, approval, duplicate-send prevention, and send-approved-reply support.
 - [x] Dashboard API exists for summary metrics, tasks, schedule, profile, progress history, and integrations.
 - [x] Website dashboard exists under `website`, with dashboard, login, onboarding, and integrations pages.
-- [x] Backend test suite is broad and currently passes with `711 passed, 59 warnings`.
+- [x] Backend test suite is broad and currently passes with `763 passed, 59 warnings`.
 
 ## Partial / Needs Verification
 
@@ -70,14 +70,15 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 
 ## Missing / TODO From Completed AI Scope
 
-- [ ] Implement task update support in `TaskService`, ADK tools, voice tools, API/dashboard paths, and tests.
-- [ ] Implement task delete support in `TaskService`, ADK tools, voice tools, API/dashboard paths, and tests.
-- [ ] Implement task snooze support in `TaskService`, ADK tools, voice tools, API/dashboard paths, and tests.
-- [ ] Implement task unsnooze support in `TaskService`, ADK tools, voice tools, API/dashboard paths, and tests.
-- [ ] Add `list_pending_tasks` to voice tools for parity with the ADK task tools.
-- [ ] Implement a dedicated goal model, status enum, migration, and service instead of relying only on `CallLog.goal` text.
-- [ ] Implement goal create/read/update/delete tools for the ADK productivity agent.
-- [ ] Implement goal create/read/update/delete tools for the voice agent.
+- [x] Implement task update support in `TaskService`, ADK tools, voice tools, and tests.
+- [x] Implement task delete support in `TaskService`, ADK tools, voice tools, and tests.
+- [x] Implement task snooze support in `TaskService`, ADK tools, voice tools, and tests.
+- [x] Implement task unsnooze support in `TaskService`, ADK tools, voice tools, and tests.
+- [x] Add `list_pending_tasks` to voice tools for parity with the ADK task tools.
+- [ ] Add task update/delete/snooze/unsnooze API and dashboard paths if task mutation should be available outside ADK/voice tools.
+- [x] Implement a dedicated goal model, status enum, migration, and service instead of relying only on `CallLog.goal` text.
+- [x] Implement goal create/read/update/delete tools for the ADK productivity agent.
+- [x] Implement goal create/read/update/delete tools for the voice agent.
 - [ ] Add goal endpoints or dashboard support if goals are intended to be user-visible outside calls.
 - [ ] Implement calendar date-range read support.
 - [ ] Implement general calendar event creation.
@@ -120,9 +121,12 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 
 ## Test Coverage TODO
 
-- [x] Ran backend verification: `uv run pytest -q` passed with `711 passed, 59 warnings`.
+- [x] Ran backend verification: `uv run pytest -q` passed with `763 passed, 59 warnings`.
 - [x] Ran frontend verification: `npm run build` passed for the website app.
 - [ ] Add ADK eval datasets for core scenarios: onboarding completion, task capture, task completion, calendar scheduling, Gmail reply, call management, and refusal/error handling.
+- [x] Add tests that assert task-tool registration and required ADK schemas for update/delete/snooze/unsnooze/list-pending parity.
+- [x] Add tests that assert voice task-tool registration and callback payloads for update/delete/snooze/unsnooze/list-pending parity.
+- [x] Add tests for GoalService lifecycle behavior plus ADK and voice goal CRUD tool payloads.
 - [ ] Add tests that assert exact root-agent tool registration against the full-tools spec.
 - [ ] Add tests that assert exact voice-tool registration against the full-tools spec.
 - [ ] Add prompt/tool behavior tests that check semantic outputs instead of only substring presence.
@@ -135,9 +139,9 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 ## Recommended Priority Order
 
 - [x] First fix small correctness/documentation gaps: `.env.example`, dashboard metrics, integration connect auth mismatch, and README overclaims.
-- [ ] Then complete task-tool parity: update, delete, snooze, unsnooze, and voice `list_pending_tasks`.
-- [ ] Then implement the goal model/service/tools, because goals are core to accountability-call semantics.
+- [x] Then complete task-tool parity: update, delete, snooze, unsnooze, and voice `list_pending_tasks`.
+- [x] Then implement the goal model/service/tools, because goals are core to accountability-call semantics.
 - [ ] Then expand Calendar and Gmail tools to match the full-tools spec.
-- [ ] Then close voice/ADK parity gaps: voice Google Search, calendar/Gmail/goal tools, and prefetch context.
+- [ ] Then close voice/ADK parity gaps: voice Google Search, calendar/Gmail, and prefetch context.
 - [ ] Then add deterministic ADK and voice evals before marking AI behavior as production-complete.
 - [ ] Finally revisit deferred product backlog items: weekend mode, urgent-email calls, auto-task from emails, Notion, Keep, Google Tasks, and Todoist.

@@ -4,6 +4,8 @@ Implements:
 - ``save_task`` — create or merge a task using pg_trgm similarity (threshold 0.6)
 - ``complete_task_by_title`` — fuzzy-match completion (threshold 0.4)
 - ``list_pending_tasks`` — ordered by priority DESC, created_at DESC
+- ``update_task`` / ``delete_task`` — fuzzy-match pending task mutations
+- ``snooze_task`` / ``unsnooze_task`` — defer and reactivate tasks
 
 Cross-source merging preserves the earliest ``created_at`` and the highest
 priority when a fuzzy duplicate is found.
@@ -26,10 +28,11 @@ logger = logging.getLogger(__name__)
 # Similarity thresholds (pg_trgm)
 SAVE_SIMILARITY_THRESHOLD = 0.6
 COMPLETION_SIMILARITY_THRESHOLD = 0.4
+MAX_TASK_LIST_LIMIT = 50
 
 
 class TaskService:
-    """Manages Task lifecycle: creation with fuzzy dedup, completion, listing."""
+    """Manages Task lifecycle: creation, mutation, completion, and listing."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -115,7 +118,12 @@ class TaskService:
         )
 
         if match is None:
-            return None
+            return await self._find_similar_by_status(
+                user_id=user_id,
+                title=title,
+                threshold=COMPLETION_SIMILARITY_THRESHOLD,
+                status=TaskStatus.COMPLETED.value,
+            )
 
         # Idempotent: already completed → no-op
         if match.status == TaskStatus.COMPLETED.value:
@@ -123,6 +131,126 @@ class TaskService:
 
         match.status = TaskStatus.COMPLETED.value
         match.completed_at = datetime.now(timezone.utc)
+        self.session.add(match)
+        await self.session.commit()
+        await self.session.refresh(match)
+        return match
+
+    # ------------------------------------------------------------------
+    # update_task — fuzzy match and edit a pending task
+    # ------------------------------------------------------------------
+
+    async def update_task(
+        self,
+        user_id: int,
+        title: str,
+        new_title: str | None = None,
+        new_priority: int | None = None,
+    ) -> Task | None:
+        """Update a pending task's title and/or priority using fuzzy matching.
+
+        Args:
+            user_id: The owning user's id.
+            title: Description to fuzzy-match against pending tasks.
+            new_title: New title to set, or None to keep the current title.
+            new_priority: New priority 0-100, or None to keep the current priority.
+
+        Returns:
+            The updated ``Task`` if found, or ``None`` if no pending task matches.
+
+        Raises:
+            ValueError: If no update fields are supplied or priority is invalid.
+        """
+        if new_title is None and new_priority is None:
+            raise ValueError(
+                "At least one of new_title or new_priority must be provided."
+            )
+        if new_title is not None and not new_title.strip():
+            raise ValueError("new_title cannot be empty.")
+        if new_priority is not None and not 0 <= new_priority <= 100:
+            raise ValueError("new_priority must be between 0 and 100.")
+
+        match = await self._find_similar_pending(
+            user_id, title, COMPLETION_SIMILARITY_THRESHOLD
+        )
+        if match is None:
+            return None
+
+        if new_title is not None:
+            match.title = new_title.strip()
+        if new_priority is not None:
+            match.priority = new_priority
+
+        self.session.add(match)
+        await self.session.commit()
+        await self.session.refresh(match)
+        return match
+
+    # ------------------------------------------------------------------
+    # delete_task — fuzzy match and hard-delete a pending task
+    # ------------------------------------------------------------------
+
+    async def delete_task(
+        self,
+        user_id: int,
+        title: str,
+    ) -> Task | None:
+        """Permanently delete a pending task using fuzzy title matching."""
+        match = await self._find_similar_pending(
+            user_id, title, COMPLETION_SIMILARITY_THRESHOLD
+        )
+        if match is None:
+            return None
+
+        await self.session.delete(match)
+        await self.session.commit()
+        return match
+
+    # ------------------------------------------------------------------
+    # snooze_task — fuzzy match and defer a pending task
+    # ------------------------------------------------------------------
+
+    async def snooze_task(
+        self,
+        user_id: int,
+        title: str,
+        snooze_until: datetime,
+    ) -> Task | None:
+        """Snooze a pending task until a specific datetime."""
+        match = await self._find_similar_pending(
+            user_id, title, COMPLETION_SIMILARITY_THRESHOLD
+        )
+        if match is None:
+            return None
+
+        match.status = TaskStatus.SNOOZED.value
+        match.snoozed_until = snooze_until
+        self.session.add(match)
+        await self.session.commit()
+        await self.session.refresh(match)
+        return match
+
+    # ------------------------------------------------------------------
+    # unsnooze_task — fuzzy match and reactivate a snoozed task
+    # ------------------------------------------------------------------
+
+    async def unsnooze_task(
+        self,
+        user_id: int,
+        title: str,
+    ) -> Task | None:
+        """Return a snoozed task to pending status using fuzzy matching."""
+        match = await self._find_similar_by_status(
+            user_id=user_id,
+            title=title,
+            threshold=COMPLETION_SIMILARITY_THRESHOLD,
+            status=TaskStatus.SNOOZED.value,
+        )
+        if match is None:
+            return None
+
+        match.status = TaskStatus.PENDING.value
+        match.snoozed_until = None
         self.session.add(match)
         await self.session.commit()
         await self.session.refresh(match)
@@ -143,6 +271,9 @@ class TaskService:
             user_id: The owning user's id.
             limit: Maximum number of tasks to return (default 10).
         """
+        limit = self._normalize_limit(limit, default=10)
+        await self._reactivate_due_snoozed_tasks(user_id)
+
         result = await self.session.exec(
             select(Task)
             .where(
@@ -184,13 +315,14 @@ class TaskService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _find_similar_pending(
+    async def _find_similar_by_status(
         self,
         user_id: int,
         title: str,
         threshold: float,
+        status: str,
     ) -> Task | None:
-        """Find the most similar pending task above *threshold*.
+        """Find the most similar task with *status* above *threshold*.
 
         Uses ``func.similarity`` from the ``pg_trgm`` extension.
         """
@@ -199,10 +331,62 @@ class TaskService:
             select(Task)
             .where(
                 Task.user_id == user_id,
-                Task.status == TaskStatus.PENDING.value,
+                Task.status == status,
                 similarity > threshold,
             )
-            .order_by(similarity.desc())
+            .order_by(
+                similarity.desc(),
+                Task.priority.desc(),  # type: ignore[union-attr]
+                Task.created_at.desc(),  # type: ignore[union-attr]
+            )
             .limit(1)
         )
         return result.first()
+
+    async def _find_similar_pending(
+        self,
+        user_id: int,
+        title: str,
+        threshold: float,
+    ) -> Task | None:
+        """Find the most similar pending task above *threshold*."""
+        await self._reactivate_due_snoozed_tasks(user_id)
+        return await self._find_similar_by_status(
+            user_id=user_id,
+            title=title,
+            threshold=threshold,
+            status=TaskStatus.PENDING.value,
+        )
+
+    async def _reactivate_due_snoozed_tasks(self, user_id: int) -> list[Task]:
+        """Move due snoozed tasks back to pending before pending lookups."""
+        now = datetime.now(timezone.utc)
+        result = await self.session.exec(
+            select(Task).where(
+                Task.user_id == user_id,
+                Task.status == TaskStatus.SNOOZED.value,
+                Task.snoozed_until <= now,  # type: ignore[operator]
+            )
+        )
+        due_tasks = list(result.all())
+        if not due_tasks:
+            return []
+
+        for task in due_tasks:
+            task.status = TaskStatus.PENDING.value
+            task.snoozed_until = None
+            self.session.add(task)
+
+        await self.session.commit()
+        for task in due_tasks:
+            await self.session.refresh(task)
+        return due_tasks
+
+    @staticmethod
+    def _normalize_limit(limit: int | None, *, default: int) -> int:
+        """Validate and cap task-list limits from users and model tools."""
+        if limit is None:
+            return default
+        if limit < 1:
+            raise ValueError(f"limit must be between 1 and {MAX_TASK_LIST_LIMIT}.")
+        return min(limit, MAX_TASK_LIST_LIMIT)

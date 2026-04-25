@@ -17,13 +17,12 @@ Validates: Requirements 9.1, 9.3, 9.5
 import asyncio
 import os
 import string
-from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-from hypothesis import given, settings, assume, HealthCheck
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text as sa_text
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -106,8 +105,9 @@ def _run_async(coro):
 
 async def _make_session():
     """Create engine, ensure tables + pg_trgm exist, return (engine, session)."""
-    import app.models  # noqa: F401
     import sqlalchemy
+
+    import app.models  # noqa: F401
 
     eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with eng.begin() as conn:
@@ -317,11 +317,13 @@ def test_completing_already_completed_task_is_noop(phone, title, priority):
             assert completed.status == TaskStatus.COMPLETED.value
             first_completed_at = completed.completed_at
 
-            # Complete again — complete_task_by_title only searches pending
-            # tasks, so it returns None when the task is already completed.
-            # This is correct idempotent behavior — no error, no side effect.
+            # Complete again — returns the already-completed task with no
+            # timestamp change.
             completed_again = await svc.complete_task_by_title(user.id, title)
-            assert completed_again is None
+            assert completed_again is not None
+            assert completed_again.id == task_id
+            assert completed_again.status == TaskStatus.COMPLETED.value
+            assert completed_again.completed_at == first_completed_at
 
             # Verify the task is still completed in DB (fresh query)
             result = await session.exec(select(Task).where(Task.id == task_id))
@@ -451,7 +453,7 @@ def test_listing_respects_limit_and_priority_order(phone, n, priorities):
             for i in range(len(result) - 1):
                 if result[i].priority == result[i + 1].priority:
                     assert result[i].created_at >= result[i + 1].created_at, (
-                        f"Equal-priority tasks should be ordered by recency"
+                        "Equal-priority tasks should be ordered by recency"
                     )
 
             await _cleanup(session, phone)

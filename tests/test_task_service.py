@@ -17,7 +17,6 @@ from app.models.task import Task
 from app.models.user import User
 from app.services.task_service import TaskService
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -75,7 +74,7 @@ class TestSaveTask:
     @pytest.mark.asyncio
     async def test_dedup_preserves_highest_priority(self, session, svc):
         user = await _create_user(session)
-        task1, _ = await svc.save_task(user.id, "File my taxes for 2025", priority=50)
+        await svc.save_task(user.id, "File my taxes for 2025", priority=50)
         task2, created = await svc.save_task(
             user.id, "File my taxes for 2026", priority=90
         )
@@ -117,7 +116,7 @@ class TestSaveTask:
     @pytest.mark.asyncio
     async def test_dedup_does_not_lower_priority(self, session, svc):
         user = await _create_user(session)
-        task1, _ = await svc.save_task(user.id, "File my taxes for 2025", priority=90)
+        await svc.save_task(user.id, "File my taxes for 2025", priority=90)
         task2, created = await svc.save_task(
             user.id, "File my taxes for 2026", priority=30
         )
@@ -180,12 +179,19 @@ class TestCompleteTaskByTitle:
     @pytest.mark.asyncio
     async def test_idempotent_on_already_completed(self, session, svc):
         user = await _create_user(session)
-        task, _ = await svc.save_task(user.id, "File my taxes")
+        await svc.save_task(user.id, "File my taxes")
 
         # Complete it
         result1 = await svc.complete_task_by_title(user.id, "File taxes")
         assert result1 is not None
         assert result1.status == TaskStatus.COMPLETED.value
+        first_completed_at = result1.completed_at
+
+        result2 = await svc.complete_task_by_title(user.id, "File taxes")
+        assert result2 is not None
+        assert result2.id == result1.id
+        assert result2.status == TaskStatus.COMPLETED.value
+        assert result2.completed_at == first_completed_at
 
     @pytest.mark.asyncio
     async def test_scoped_to_user(self, session, svc):
@@ -196,6 +202,265 @@ class TestCompleteTaskByTitle:
         # User2 should not find user1's task
         result = await svc.complete_task_by_title(user2.id, "File taxes")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# update_task
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateTask:
+    """Tests for TaskService.update_task."""
+
+    @pytest.mark.asyncio
+    async def test_updates_title_and_priority(self, session, svc):
+        user = await _create_user(session)
+        task, _ = await svc.save_task(user.id, "File my taxes", priority=40)
+
+        result = await svc.update_task(
+            user.id,
+            "file taxes",
+            new_title="File quarterly taxes",
+            new_priority=90,
+        )
+
+        assert result is not None
+        assert result.id == task.id
+        assert result.title == "File quarterly taxes"
+        assert result.priority == 90
+        assert result.status == TaskStatus.PENDING.value
+
+    @pytest.mark.asyncio
+    async def test_updates_only_priority(self, session, svc):
+        user = await _create_user(session)
+        task, _ = await svc.save_task(
+            user.id, "Schedule dentist appointment", priority=20
+        )
+
+        result = await svc.update_task(
+            user.id,
+            "dentist appointment",
+            new_priority=80,
+        )
+
+        assert result is not None
+        assert result.id == task.id
+        assert result.title == "Schedule dentist appointment"
+        assert result.priority == 80
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_pending_match(self, session, svc):
+        user = await _create_user(session)
+        await svc.save_task(user.id, "File my taxes")
+
+        result = await svc.update_task(user.id, "buy a new car", new_priority=90)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_update(self, session, svc):
+        user = await _create_user(session)
+        await svc.save_task(user.id, "File my taxes")
+
+        with pytest.raises(ValueError, match="At least one"):
+            await svc.update_task(user.id, "file taxes")
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_priority(self, session, svc):
+        user = await _create_user(session)
+        await svc.save_task(user.id, "File my taxes")
+
+        with pytest.raises(ValueError, match="between 0 and 100"):
+            await svc.update_task(user.id, "file taxes", new_priority=101)
+
+    @pytest.mark.asyncio
+    async def test_does_not_update_completed_or_snoozed_tasks(self, session, svc):
+        user = await _create_user(session)
+        completed, _ = await svc.save_task(user.id, "Done tax task")
+        completed.status = TaskStatus.COMPLETED.value
+        completed.completed_at = datetime.now(timezone.utc)
+        snoozed, _ = await svc.save_task(user.id, "Deferred tax task")
+        snoozed.status = TaskStatus.SNOOZED.value
+        snoozed.snoozed_until = datetime.now(timezone.utc) + timedelta(days=1)
+        session.add(completed)
+        session.add(snoozed)
+        await session.commit()
+
+        result = await svc.update_task(user.id, "tax task", new_priority=90)
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# delete_task
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteTask:
+    """Tests for TaskService.delete_task."""
+
+    @pytest.mark.asyncio
+    async def test_deletes_matching_pending_task(self, session, svc):
+        user = await _create_user(session)
+        task, _ = await svc.save_task(user.id, "Buy groceries")
+        task_id = task.id
+
+        result = await svc.delete_task(user.id, "groceries")
+
+        assert result is not None
+        assert result.id == task_id
+        assert result.title == "Buy groceries"
+        assert await session.get(Task, task_id) is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_pending_match(self, session, svc):
+        user = await _create_user(session)
+        await svc.save_task(user.id, "Buy groceries")
+
+        result = await svc.delete_task(user.id, "file taxes")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_does_not_delete_completed_task(self, session, svc):
+        user = await _create_user(session)
+        task, _ = await svc.save_task(user.id, "Buy groceries")
+        task.status = TaskStatus.COMPLETED.value
+        task.completed_at = datetime.now(timezone.utc)
+        session.add(task)
+        await session.commit()
+
+        result = await svc.delete_task(user.id, "groceries")
+
+        assert result is None
+        assert await session.get(Task, task.id) is not None
+
+    @pytest.mark.asyncio
+    async def test_scoped_to_user(self, session, svc):
+        user1 = await _create_user(session, "+15551111111")
+        user2 = await _create_user(session, "+15552222222")
+        task, _ = await svc.save_task(user1.id, "Buy groceries")
+
+        result = await svc.delete_task(user2.id, "groceries")
+
+        assert result is None
+        assert await session.get(Task, task.id) is not None
+
+
+# ---------------------------------------------------------------------------
+# snooze_task / unsnooze_task
+# ---------------------------------------------------------------------------
+
+
+class TestSnoozeTask:
+    """Tests for TaskService.snooze_task and unsnooze_task."""
+
+    @pytest.mark.asyncio
+    async def test_snoozes_matching_pending_task(self, session, svc):
+        user = await _create_user(session)
+        task, _ = await svc.save_task(user.id, "Buy groceries")
+        snooze_until = datetime.now(timezone.utc) + timedelta(days=1)
+
+        result = await svc.snooze_task(user.id, "groceries", snooze_until)
+
+        assert result is not None
+        assert result.id == task.id
+        assert result.status == TaskStatus.SNOOZED.value
+        assert result.snoozed_until == snooze_until
+
+    @pytest.mark.asyncio
+    async def test_snooze_returns_none_when_no_pending_match(self, session, svc):
+        user = await _create_user(session)
+        await svc.save_task(user.id, "Buy groceries")
+        snooze_until = datetime.now(timezone.utc) + timedelta(days=1)
+
+        result = await svc.snooze_task(user.id, "file taxes", snooze_until)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_snoozed_tasks_excluded_from_pending_list(self, session, svc):
+        user = await _create_user(session)
+        await svc.save_task(user.id, "Pending task")
+        await svc.save_task(user.id, "Snooze me")
+        snooze_until = datetime.now(timezone.utc) + timedelta(days=1)
+
+        await svc.snooze_task(user.id, "snooze me", snooze_until)
+        tasks = await svc.list_pending_tasks(user.id)
+
+        assert [task.title for task in tasks] == ["Pending task"]
+
+    @pytest.mark.asyncio
+    async def test_due_snoozed_tasks_reappear_in_pending_list(self, session, svc):
+        user = await _create_user(session)
+        task, _ = await svc.save_task(user.id, "Snooze me briefly")
+        snooze_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+
+        await svc.snooze_task(user.id, "snooze me briefly", snooze_until)
+        tasks = await svc.list_pending_tasks(user.id)
+
+        assert len(tasks) == 1
+        assert tasks[0].id == task.id
+        assert tasks[0].status == TaskStatus.PENDING.value
+        assert tasks[0].snoozed_until is None
+
+    @pytest.mark.asyncio
+    async def test_unsnoozes_matching_snoozed_task(self, session, svc):
+        user = await _create_user(session)
+        task, _ = await svc.save_task(user.id, "Buy groceries")
+        snooze_until = datetime.now(timezone.utc) + timedelta(days=1)
+        await svc.snooze_task(user.id, "groceries", snooze_until)
+
+        result = await svc.unsnooze_task(user.id, "groceries")
+
+        assert result is not None
+        assert result.id == task.id
+        assert result.status == TaskStatus.PENDING.value
+        assert result.snoozed_until is None
+
+    @pytest.mark.asyncio
+    async def test_unsnooze_returns_none_for_pending_task(self, session, svc):
+        user = await _create_user(session)
+        await svc.save_task(user.id, "Buy groceries")
+
+        result = await svc.unsnooze_task(user.id, "groceries")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fuzzy_tie_break_prefers_priority_then_recency(self, session, svc):
+        user = await _create_user(session)
+        older = Task(
+            user_id=user.id,
+            title="Review tax documents alpha",
+            priority=30,
+            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        newer_low = Task(
+            user_id=user.id,
+            title="Review tax documents alpha",
+            priority=30,
+            created_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+        high_priority = Task(
+            user_id=user.id,
+            title="Review tax documents alpha",
+            priority=90,
+            created_at=datetime.now(timezone.utc) - timedelta(hours=3),
+        )
+        session.add(older)
+        session.add(newer_low)
+        session.add(high_priority)
+        await session.commit()
+
+        result = await svc.update_task(
+            user.id,
+            "review tax documents alpha",
+            new_title="Review tax packet",
+        )
+
+        assert result is not None
+        assert result.id == high_priority.id
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +514,30 @@ class TestListPendingTasks:
 
         tasks = await svc.list_pending_tasks(user.id, limit=3)
         assert len(tasks) == 3
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_positive_limit(self, session, svc):
+        user = await _create_user(session)
+
+        with pytest.raises(ValueError, match="limit must be between 1 and 50"):
+            await svc.list_pending_tasks(user.id, limit=0)
+
+    @pytest.mark.asyncio
+    async def test_caps_large_limit(self, session, svc):
+        user = await _create_user(session)
+        for index in range(55):
+            session.add(
+                Task(
+                    user_id=user.id,
+                    title=f"Unique limit task {index}",
+                    priority=index % 100,
+                )
+            )
+        await session.commit()
+
+        tasks = await svc.list_pending_tasks(user.id, limit=999)
+
+        assert len(tasks) == 50
 
     @pytest.mark.asyncio
     async def test_empty_when_no_tasks(self, session, svc):

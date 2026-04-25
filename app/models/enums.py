@@ -72,6 +72,14 @@ class TaskSource(str, Enum):
     IMPORT = "import"
 
 
+class GoalStatus(str, Enum):
+    """Goal.status."""
+
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
+
 class DraftStatus(str, Enum):
     """EmailDraftState.status."""
 

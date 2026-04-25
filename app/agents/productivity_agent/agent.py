@@ -16,11 +16,11 @@ Gemini 3 Flash natively supports combining built-in tools (google_search)
 with custom tools / sub-agents, so no AgentTool wrapper is needed.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from google.adk.agents import Agent
 from google.adk.agents.callback_context import CallbackContext
-from google.adk.tools import google_search
+from google.adk.tools import FunctionTool, google_search
 from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.tool_context import ToolContext
 from google.genai import types
@@ -38,6 +38,14 @@ from .call_window_tools import (
     remove_call_window,
     update_call_window,
 )
+from .goal_tools import (
+    abandon_goal,
+    complete_goal,
+    create_goal,
+    delete_goal,
+    list_goals,
+    update_goal,
+)
 from .google_tools import (
     check_emails_needing_reply,
     create_calendar_time_block,
@@ -49,13 +57,44 @@ from .google_tools import (
     update_email_draft,
 )
 from .onboarding_agent import onboarding_agent
-from .tools import complete_task_by_title, list_pending_tasks, save_task
+from .tools import (
+    complete_task_by_title,
+    delete_task,
+    list_pending_tasks,
+    save_task,
+    snooze_task,
+    unsnooze_task,
+    update_task,
+)
 
 # ---------------------------------------------------------------------------
-# Task management tools — thin wrappers around TaskService, auto-wrapped
-# as FunctionTool by ADK when added to the tools list.
+# Task management tools — thin wrappers around TaskService.
 # ---------------------------------------------------------------------------
-_task_tools = [save_task, complete_task_by_title, list_pending_tasks]
+_delete_task_tool = FunctionTool(delete_task, require_confirmation=True)
+
+_task_tools = [
+    save_task,
+    complete_task_by_title,
+    list_pending_tasks,
+    update_task,
+    _delete_task_tool,
+    snooze_task,
+    unsnooze_task,
+]
+
+# ---------------------------------------------------------------------------
+# Goal management tools — objectives that span days or weeks.
+# ---------------------------------------------------------------------------
+_delete_goal_tool = FunctionTool(delete_goal, require_confirmation=True)
+
+_goal_tools = [
+    create_goal,
+    list_goals,
+    update_goal,
+    complete_goal,
+    abandon_goal,
+    _delete_goal_tool,
+]
 
 # ---------------------------------------------------------------------------
 # Call management tools — thin wrappers around CallManagementService.
@@ -97,8 +136,8 @@ _google_tools = [
 # before_tool_callback: block tools until onboarding is complete
 # ---------------------------------------------------------------------------
 def _block_tools_before_onboarding(
-    tool: BaseTool, args: Dict[str, Any], tool_context: ToolContext
-) -> Optional[Dict]:
+    tool: BaseTool, args: dict[str, Any], tool_context: ToolContext
+) -> dict | None:
     """Block all tools except transfer_to_agent when onboarding is incomplete.
 
     This hard-gates tool access so that an un-onboarded user cannot
@@ -115,6 +154,7 @@ def _block_tools_before_onboarding(
 
     return None  # Onboarding complete — allow all tools
 
+
 # ---------------------------------------------------------------------------
 # Shared generation config.
 # max_output_tokens in Gemini 3 includes BOTH thinking and visible tokens.
@@ -126,12 +166,13 @@ _generation_config = types.GenerateContentConfig(
     temperature=0.7,
 )
 
+
 # ---------------------------------------------------------------------------
 # before_agent_callback: block task_manager until onboarding is complete
 # ---------------------------------------------------------------------------
 def _block_agent_before_onboarding(
     callback_context: CallbackContext,
-) -> Optional[types.Content]:
+) -> types.Content | None:
     """Block sub-agents that require onboarding to be complete.
 
     Returning Content skips the agent entirely — preventing an un-onboarded
@@ -139,7 +180,11 @@ def _block_agent_before_onboarding(
     """
     if not callback_context.state.get("user:onboarding_complete"):
         return types.Content(
-            parts=[types.Part(text="Please complete onboarding first so I can help you with that.")],
+            parts=[
+                types.Part(
+                    text="Please complete onboarding first so I can help you with that."
+                )
+            ],
             role="model",
         )
     return None
@@ -152,13 +197,16 @@ task_manager_agent = Agent(
     name="task_manager",
     model="gemini-3.1-pro-preview",
     description=(
-        "Handles task management: creating, listing, updating, and completing tasks. "
+        "Handles task management: creating, listing, updating, deleting, "
+        "snoozing, unsnoozing, and completing tasks. "
         "Only available after onboarding is complete."
     ),
     instruction=(
         "You are a task management specialist. Help users create, "
         "organize, and track their tasks. When the user asks to create, "
-        "list, update, or complete a task, handle it directly. "
+        "list, update, delete, snooze, unsnooze, or complete a task, "
+        "handle it directly. Confirm ambiguous delete requests before using "
+        "the delete tool. "
         "Keep responses concise."
     ),
     tools=_task_tools,
@@ -235,11 +283,51 @@ mark it done using the task description. Fuzzy matching handles variations.
 - **list_pending_tasks**: Fetch the user's top pending tasks when they ask \
 "what do I need to do?" or similar.
 
+- **update_task**: When the user wants to rename a task or change its \
+priority, call this with the current task description and the new values.
+
+- **delete_task**: When the user wants to remove a task they no longer need, \
+delete it by matching the task description. Ask for confirmation first if the \
+request is ambiguous.
+
+- **snooze_task**: When the user wants to defer a task, call this with the \
+task description and a timezone-aware ISO datetime for when it should reappear.
+
+- **unsnooze_task**: When the user wants a deferred task back on their active \
+list, reactivate it by matching the snoozed task description.
+
 IMPORTANT: Do NOT present tasks as a numbered list. Surface them \
 conversationally:
 - "I see you mentioned needing to file taxes — want to make that today's goal?"
 - "You have a few things on your plate, including that report for Sarah. \
 Which feels most important today?"
+
+## Goal Management
+Goals are higher-level objectives that can span days or weeks. Tasks are \
+specific action items. If the user mentions a broader objective like \
+"finish tax filing this week" or "prepare for Monday's presentation", use \
+goal tools. If they mention a small next action, use task tools.
+
+- **create_goal**: Create a goal when the user names a broader objective. \
+Include target_date only when they mention a clear date or deadline.
+
+- **list_goals**: Fetch goals when the user asks about current objectives. \
+Use status "active" for current goals, "completed" for finished goals, and \
+"abandoned" for dropped goals.
+
+- **update_goal**: Change a goal's title, description, or target date. Use \
+list_goals first if you need the internal goal_id.
+
+- **complete_goal**: Mark a goal completed when the user says they achieved it.
+
+- **abandon_goal**: Mark a goal abandoned when the user decides to drop it.
+
+- **delete_goal**: Permanently remove a goal only when the user explicitly \
+wants it removed from history. Ask for confirmation first if the request is \
+ambiguous.
+
+IMPORTANT: Use goal IDs internally, but never speak IDs to the user. Refer to \
+goals by title in your response.
 
 ## Call Management
 Help users manage their scheduled calls:
@@ -299,7 +387,14 @@ root_agent = Agent(
     description="Main Charu AI assistant that coordinates onboarding and daily accountability.",
     instruction=_ROOT_INSTRUCTION,
     sub_agents=[onboarding_agent, task_manager_agent],
-    tools=[google_search] + _task_tools + _call_management_tools + _call_window_tools + _google_tools,
+    tools=[
+        google_search,
+        *_task_tools,
+        *_goal_tools,
+        *_call_management_tools,
+        *_call_window_tools,
+        *_google_tools,
+    ],
     before_tool_callback=_block_tools_before_onboarding,
     generate_content_config=_generation_config,
 )
