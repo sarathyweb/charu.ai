@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-04-25",
+  "items": [
+    {
+      "id": "weekend_mode",
+      "title": "Weekend mode",
+      "status": "deferred_needs_spec",
+      "owner_area": "voice_call_behavior",
+      "decision": "Keep in active backlog until call timing, tone, and opt-in behavior are specified.",
+      "next_step": "Define weekend call copy, eligible call windows, and whether weekend calls are opt-in or automatic."
+    },
+    {
+      "id": "urgent_email_calls",
+      "title": "Urgent-email proactive calls",
+      "status": "deferred_needs_spec",
+      "owner_area": "gmail_call_automation",
+      "decision": "Do not enable proactive calling from email classification without user preference, rate limits, and escalation rules.",
+      "next_step": "Specify urgency classifier, allowed hours, user controls, and call dedupe behavior."
+    },
+    {
+      "id": "auto_task_from_emails",
+      "title": "Auto-task creation from emails",
+      "status": "deferred_needs_spec",
+      "owner_area": "gmail_task_extraction",
+      "decision": "Keep manual Gmail-to-draft/task flows first; automatic task creation needs confidence thresholds and review UX.",
+      "next_step": "Define extraction confidence, task source labels, dedupe rules, and user confirmation policy."
+    },
+    {
+      "id": "notion",
+      "title": "Notion integration",
+      "status": "deferred_integration",
+      "owner_area": "third_party_integrations",
+      "decision": "Notion remains out of active implementation scope until OAuth, workspace mapping, and sync direction are specified.",
+      "next_step": "Write a dedicated Notion integration spec before adding models or tools."
+    },
+    {
+      "id": "google_keep",
+      "title": "Google Keep integration",
+      "status": "deferred_integration",
+      "owner_area": "third_party_integrations",
+      "decision": "Google Keep remains out of active implementation scope until API availability, OAuth scopes, and note/task mapping are specified.",
+      "next_step": "Confirm viable API surface and add a dedicated integration spec."
+    },
+    {
+      "id": "google_tasks",
+      "title": "Google Tasks import",
+      "status": "deferred_integration",
+      "owner_area": "third_party_integrations",
+      "decision": "Google Tasks import remains deferred until import direction, dedupe, and recurring-task semantics are specified.",
+      "next_step": "Write import requirements and migration/dedupe behavior."
+    },
+    {
+      "id": "todoist",
+      "title": "Todoist import",
+      "status": "deferred_integration",
+      "owner_area": "third_party_integrations",
+      "decision": "Todoist import remains deferred until OAuth, project mapping, label mapping, and recurring-task semantics are specified.",
+      "next_step": "Write import requirements and account-linking behavior."
+    }
+  ]
+}

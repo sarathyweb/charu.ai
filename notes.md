@@ -160,6 +160,12 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: composing a new email is externally visible and should be confirmation-gated, while archive should preserve mail history and match Gmail's non-destructive inbox cleanup behavior.
   Source: `.pm/research/80-calendar-gmail-full-tools-expansion.md`
 
+## AI Evaluation Decisions
+
+- 2026-04-25: Production-readiness checks now include deterministic ADK eval data, voice eval contracts, exact root-agent tool registration tests, and an explicit deferred-product backlog review.
+  Rationale: live model evals are valuable but should be backed by source-controlled contracts that fail deterministically when tool names, schemas, confirmation gates, voice safety flags, or core scenario coverage drift.
+  Source: `.pm/research/81-deterministic-adk-voice-evals-and-backlog.md`
+
 ## Tech Stack
 
 - Python 3.10+

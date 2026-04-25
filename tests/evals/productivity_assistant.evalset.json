@@ -1,0 +1,147 @@
+[
+  {
+    "name": "core_accountability_tool_trajectory",
+    "initial_session": {
+      "app_name": "charu_ai",
+      "user_id": "eval-user",
+      "state": {
+        "phone": "+15551234567",
+        "user:onboarding_complete": true,
+        "user:name": "Asha"
+      }
+    },
+    "data": [
+      {
+        "query": "I'm new here. Help me finish setup so you can call me tomorrow.",
+        "expected_tool_use": [],
+        "expected_intermediate_agent_responses": [
+          {
+            "author": "onboarding",
+            "text": "I'll get your onboarding details first."
+          }
+        ],
+        "reference": "I will help you complete onboarding first."
+      },
+      {
+        "query": "Remember that I need to file taxes tomorrow.",
+        "expected_tool_use": [
+          {
+            "tool_name": "save_task",
+            "tool_input": {
+              "title": "File taxes tomorrow",
+              "priority": 50,
+              "source": "user_mention"
+            }
+          }
+        ],
+        "expected_intermediate_agent_responses": [],
+        "reference": "Got it. I saved filing taxes for tomorrow."
+      },
+      {
+        "query": "I finished filing taxes.",
+        "expected_tool_use": [
+          {
+            "tool_name": "complete_task_by_title",
+            "tool_input": {
+              "title": "filing taxes"
+            }
+          }
+        ],
+        "expected_intermediate_agent_responses": [],
+        "reference": "Nice. I marked filing taxes as done."
+      },
+      {
+        "query": "Make preparing for Monday's client presentation a goal for next week.",
+        "expected_tool_use": [
+          {
+            "tool_name": "create_goal",
+            "tool_input": {
+              "title": "Prepare for Monday's client presentation",
+              "description": "Get ready for the client presentation next week",
+              "target_date": "2026-04-27"
+            }
+          }
+        ],
+        "expected_intermediate_agent_responses": [],
+        "reference": "I added that as a goal for next week."
+      },
+      {
+        "query": "Find me a 45 minute opening today for the tax task.",
+        "expected_tool_use": [
+          {
+            "tool_name": "suggest_calendar_time_block",
+            "tool_input": {
+              "task_title": "tax task",
+              "duration_minutes": 45
+            }
+          }
+        ],
+        "expected_intermediate_agent_responses": [],
+        "reference": "I found a possible 45 minute opening and can block it if you want."
+      },
+      {
+        "query": "Schedule a planning event for tomorrow from 9 to 9:30 AM.",
+        "expected_tool_use": [
+          {
+            "tool_name": "create_calendar_event",
+            "tool_input": {
+              "summary": "Planning",
+              "start_iso": "2026-04-26T09:00:00-04:00",
+              "end_iso": "2026-04-26T09:30:00-04:00",
+              "description": ""
+            }
+          }
+        ],
+        "expected_intermediate_agent_responses": [],
+        "reference": "Done. I created the planning event."
+      },
+      {
+        "query": "Check whether I have any emails that need a reply and draft one for the first.",
+        "expected_tool_use": [
+          {
+            "tool_name": "check_emails_needing_reply",
+            "tool_input": {}
+          },
+          {
+            "tool_name": "get_email_for_reply",
+            "tool_input": {
+              "message_id": "msg_1"
+            }
+          },
+          {
+            "tool_name": "save_email_draft",
+            "tool_input": {
+              "thread_id": "thread_1",
+              "original_email_id": "msg_1",
+              "original_from": "Asha <asha@example.com>",
+              "original_subject": "Launch plan",
+              "original_message_id": "rfc822-message-id",
+              "draft_text": "Thanks, I will review this and get back to you today."
+            }
+          }
+        ],
+        "expected_intermediate_agent_responses": [],
+        "reference": "I found an email that needs a reply and saved a draft for review."
+      },
+      {
+        "query": "Call me back in 15 minutes.",
+        "expected_tool_use": [
+          {
+            "tool_name": "schedule_callback",
+            "tool_input": {
+              "minutes_from_now": 15
+            }
+          }
+        ],
+        "expected_intermediate_agent_responses": [],
+        "reference": "Done. I scheduled a callback in 15 minutes."
+      },
+      {
+        "query": "Send that draft right now, I guess.",
+        "expected_tool_use": [],
+        "expected_intermediate_agent_responses": [],
+        "reference": "Please clearly confirm the exact draft you want me to send before I send anything."
+      }
+    ]
+  }
+]

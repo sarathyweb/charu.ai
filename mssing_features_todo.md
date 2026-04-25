@@ -51,11 +51,11 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Gmail write support exists for composing new emails, archiving messages, and draft-reviewed reply send flows with duplicate-send prevention.
 - [x] Dashboard API exists for summary metrics, tasks, schedule, profile, progress history, and integrations.
 - [x] Website dashboard exists under `website`, with dashboard, login, onboarding, and integrations pages.
-- [x] Backend test suite is broad and currently passes with `776 passed, 59 warnings`.
+- [x] Backend test suite is broad and currently passes with `787 passed, 59 warnings`.
 
 ## Partial / Needs Verification
 
-- [ ] Add deterministic ADK evals for root-agent routing, sub-agent handoff, tool selection, and tool argument quality.
+- [x] Add deterministic ADK evals for root-agent routing, sub-agent handoff, tool selection, and tool argument quality.
 - [ ] Add true conversation-level tests for onboarding; current coverage is stronger around services/tools than complete ADK flow.
 - [ ] Add voice pipeline integration tests that exercise frames, Gemini Live behavior, barge-in/interruption, tool calls, and cleanup together.
 - [ ] Guarantee voice outcome persistence when the LLM does not call the expected save-outcome tool before disconnect; cleanup currently cannot prove the outcome exists in all cases.
@@ -118,16 +118,17 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [ ] Add Notion integration only if it is still in active scope; current docs describe it as deferred.
 - [ ] Add Google Keep integration only if it is still in active scope; current docs describe it as deferred.
 - [ ] Add Google Tasks/Todoist import only if it is still in active scope; current implementation evidence was not found.
+- [x] Revisited deferred backlog scope and captured product decisions/next steps in `tests/evals/deferred_product_backlog_review.json`.
 
 ## Test Coverage TODO
 
-- [x] Ran backend verification: `uv run pytest -q` passed with `776 passed, 59 warnings`.
+- [x] Ran backend verification: `uv run pytest -q` passed with `787 passed, 59 warnings`.
 - [x] Ran frontend verification: `npm run build` passed for the website app.
-- [ ] Add ADK eval datasets for core scenarios: onboarding completion, task capture, task completion, calendar scheduling, Gmail reply, call management, and refusal/error handling.
+- [x] Add ADK eval datasets for core scenarios: onboarding completion, task capture, task completion, calendar scheduling, Gmail reply, call management, and refusal/error handling.
 - [x] Add tests that assert task-tool registration and required ADK schemas for update/delete/snooze/unsnooze/list-pending parity.
 - [x] Add tests that assert voice task-tool registration and callback payloads for update/delete/snooze/unsnooze/list-pending parity.
 - [x] Add tests for GoalService lifecycle behavior plus ADK and voice goal CRUD tool payloads.
-- [ ] Add tests that assert exact root-agent tool registration against the full-tools spec.
+- [x] Add tests that assert exact root-agent tool registration against the full-tools spec.
 - [ ] Add tests that assert exact voice-tool registration against the full-tools spec.
 - [ ] Add prompt/tool behavior tests that check semantic outputs instead of only substring presence.
 - [x] Add Gmail tests for search, read, compose, and archive once implemented.
@@ -143,5 +144,5 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Then implement the goal model/service/tools, because goals are core to accountability-call semantics.
 - [x] Then expand Calendar and Gmail tools to match the full-tools spec.
 - [ ] Then close voice/ADK parity gaps: voice Google Search, call-window voice tools, exact parity checks, and prefetch context.
-- [ ] Then add deterministic ADK and voice evals before marking AI behavior as production-complete.
-- [ ] Finally revisit deferred product backlog items: weekend mode, urgent-email calls, auto-task from emails, Notion, Keep, Google Tasks, and Todoist.
+- [x] Then add deterministic ADK and voice evals before marking AI behavior as production-complete.
+- [x] Finally revisit deferred product backlog items: weekend mode, urgent-email calls, auto-task from emails, Notion, Keep, Google Tasks, and Todoist.

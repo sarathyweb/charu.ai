@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "channel": "voice",
+  "cases": [
+    {
+      "id": "voice_task_capture",
+      "scenario": "task_capture",
+      "utterance": "I need to file taxes tomorrow.",
+      "expected_tools": ["save_task"],
+      "required_args": {
+        "save_task": ["title", "priority", "source"]
+      },
+      "non_cancellable_tools": ["save_task"]
+    },
+    {
+      "id": "voice_list_pending_tasks",
+      "scenario": "task_list",
+      "utterance": "What do I need to do today?",
+      "expected_tools": ["list_pending_tasks"],
+      "required_args": {
+        "list_pending_tasks": []
+      },
+      "non_cancellable_tools": []
+    },
+    {
+      "id": "voice_task_update_delete_snooze",
+      "scenario": "task_parity",
+      "utterance": "Move the tax task to tomorrow, rename it, then delete the old duplicate.",
+      "expected_tools": ["update_task", "snooze_task", "delete_task"],
+      "required_args": {
+        "update_task": ["title"],
+        "snooze_task": ["title", "snooze_until"],
+        "delete_task": ["title"]
+      },
+      "non_cancellable_tools": ["update_task", "snooze_task", "delete_task"]
+    },
+    {
+      "id": "voice_goal_create",
+      "scenario": "goal_management",
+      "utterance": "My goal this week is to prepare for the client presentation.",
+      "expected_tools": ["create_goal"],
+      "required_args": {
+        "create_goal": ["title"]
+      },
+      "non_cancellable_tools": ["create_goal"]
+    },
+    {
+      "id": "voice_calendar_schedule",
+      "scenario": "calendar_scheduling",
+      "utterance": "Block 30 minutes on my calendar for writing the proposal.",
+      "expected_tools": ["suggest_calendar_time_block", "create_calendar_time_block"],
+      "required_args": {
+        "suggest_calendar_time_block": ["task_title", "duration_minutes"],
+        "create_calendar_time_block": ["task_title", "start_iso", "end_iso"]
+      },
+      "non_cancellable_tools": ["create_calendar_time_block"]
+    },
+    {
+      "id": "voice_gmail_reply",
+      "scenario": "gmail_reply",
+      "utterance": "Check my email and draft a reply to the first thing that needs me.",
+      "expected_tools": ["check_emails_needing_reply", "get_email_for_reply", "save_email_draft"],
+      "required_args": {
+        "check_emails_needing_reply": [],
+        "get_email_for_reply": ["message_id"],
+        "save_email_draft": [
+          "thread_id",
+          "original_email_id",
+          "original_from",
+          "original_subject",
+          "original_message_id",
+          "draft_text"
+        ]
+      },
+      "non_cancellable_tools": ["save_email_draft"]
+    },
+    {
+      "id": "voice_call_management",
+      "scenario": "call_management",
+      "utterance": "Call me back in 20 minutes.",
+      "expected_tools": ["schedule_callback"],
+      "required_args": {
+        "schedule_callback": ["minutes_from_now"]
+      },
+      "non_cancellable_tools": ["schedule_callback"]
+    },
+    {
+      "id": "voice_refusal_send_without_approval",
+      "scenario": "refusal_error_handling",
+      "utterance": "Send that email, maybe if it looks okay.",
+      "expected_tools": [],
+      "required_args": {},
+      "non_cancellable_tools": []
+    }
+  ],
+  "prompt_expectations": {
+    "morning": [
+      "You MUST call save_call_outcome before ending the call",
+      "Before calling a tool",
+      "After a tool returns"
+    ],
+    "evening": [
+      "You MUST call save_evening_call_outcome before ending the call",
+      "Before calling a tool",
+      "After a tool returns"
+    ]
+  },
+  "known_missing_voice_parity_tools": [
+    "google_search",
+    "add_call_window",
+    "update_call_window",
+    "remove_call_window",
+    "list_call_windows"
+  ]
+}
