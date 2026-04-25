@@ -28,8 +28,8 @@ User ◄── Voice call ◄── Twilio Media Streams ◄── Pipecat + Gem
 - On-demand callback requests
 - Task management with fuzzy matching (create, complete, list pending/completed)
 - Goal capture during accountability calls
-- Google Calendar integration (read today's events, find available gaps, create time blocks)
-- Gmail integration (check emails needing reply, draft reviewed replies, send approved replies)
+- Google Calendar integration (today/range reads, event CRUD, available gaps, create time blocks)
+- Gmail integration (search/read, compose/send, archive, reviewed reply drafts, send approved replies)
 - Web search through the ADK text agent
 - Post-call WhatsApp recaps and midday check-ins
 - Weekly progress summaries

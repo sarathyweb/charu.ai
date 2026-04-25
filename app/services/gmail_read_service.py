@@ -88,6 +88,34 @@ def _parse_headers(msg: dict) -> dict[str, str]:
     }
 
 
+def _clean_query(query: str) -> str:
+    """Return stripped Gmail query text or raise a validation error."""
+    clean = query.strip()
+    if not clean:
+        raise ValueError("query cannot be empty.")
+    return clean
+
+
+def _validate_max_results(max_results: int) -> int:
+    """Validate Gmail search limits exposed to agent tools."""
+    if max_results < 1 or max_results > 10:
+        raise ValueError("max_results must be between 1 and 10.")
+    return max_results
+
+
+def _email_summary(msg_result: dict) -> dict:
+    """Return the standard metadata summary payload for one Gmail message."""
+    headers = _parse_headers(msg_result)
+    return {
+        "id": msg_result["id"],
+        "thread_id": msg_result["threadId"],
+        "subject": headers.get("Subject", "(No subject)"),
+        "from": headers.get("From", "Unknown"),
+        "date": headers.get("Date", ""),
+        "snippet": msg_result.get("snippet", ""),
+    }
+
+
 async def get_emails_needing_reply(
     user: User,
     session: AsyncSession,
@@ -174,22 +202,100 @@ async def get_emails_needing_reply(
             )
             continue
 
-        headers = _parse_headers(msg_result)
-        sender = headers.get("From", "Unknown")
+        summary = _email_summary(msg_result)
+        sender = summary["from"]
 
         if _is_no_reply_sender(sender):
             continue
 
-        emails.append({
-            "id": msg_result["id"],
-            "thread_id": msg_result["threadId"],
-            "subject": headers.get("Subject", "(No subject)"),
-            "from": sender,
-            "date": headers.get("Date", ""),
-            "snippet": msg_result.get("snippet", ""),
-        })
+        emails.append(summary)
 
     return emails
+
+
+async def search_emails(
+    user: User,
+    session: AsyncSession,
+    *,
+    query: str,
+    max_results: int = 5,
+) -> list[dict] | dict:
+    """Search Gmail and return up to ``max_results`` message summaries."""
+    clean_query = _clean_query(query)
+    limit = _validate_max_results(max_results)
+
+    credentials = build_google_credentials(
+        access_token_encrypted=user.google_access_token_encrypted,
+        refresh_token_encrypted=user.google_refresh_token_encrypted,
+        token_expiry=user.google_token_expiry,
+    )
+    service = _build_gmail_service(credentials)
+
+    list_result = await google_api_call(
+        user=user,
+        credentials=credentials,
+        api_callable=lambda: service.users().messages().list(
+            userId="me",
+            q=clean_query,
+            maxResults=limit,
+        ).execute(),
+        session=session,
+    )
+
+    if isinstance(list_result, dict) and "error" in list_result:
+        return list_result
+
+    message_refs: list[dict] = list_result.get("messages", [])
+    if not message_refs:
+        return []
+
+    emails: list[dict] = []
+    for msg_ref in message_refs[:limit]:
+        msg_result = await google_api_call(
+            user=user,
+            credentials=credentials,
+            api_callable=lambda msg_id=msg_ref["id"]: service.users().messages().get(
+                userId="me",
+                id=msg_id,
+                format="metadata",
+                metadataHeaders=["From", "Subject", "Date"],
+            ).execute(),
+            session=session,
+        )
+
+        if isinstance(msg_result, dict) and "error" in msg_result:
+            logger.warning(
+                "Failed to fetch message %s for user %s: %s",
+                msg_ref["id"], user.id, msg_result.get("error"),
+            )
+            continue
+
+        emails.append(_email_summary(msg_result))
+
+    return emails
+
+
+async def read_email_by_query(
+    user: User,
+    session: AsyncSession,
+    *,
+    query: str,
+) -> dict:
+    """Search Gmail and return the full content of the top matching email."""
+    matches = await search_emails(user, session, query=query, max_results=1)
+    if isinstance(matches, dict) and "error" in matches:
+        return matches
+    if not matches:
+        return {
+            "error": "not_found",
+            "message": "No email matched that search query.",
+        }
+
+    return await get_email_for_reply(
+        user,
+        session,
+        message_id=matches[0]["id"],
+    )
 
 
 async def get_email_for_reply(

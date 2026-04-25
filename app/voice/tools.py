@@ -26,6 +26,7 @@ from pipecat.services.llm_service import FunctionCallParams
 
 from app.db import async_session_factory
 from app.models.call_log import CallLog
+from app.models.user import User
 from app.services.call_management_service import CallManagementService
 from app.services.goal_service import GoalService
 from app.services.task_service import TaskService
@@ -76,6 +77,31 @@ def _parse_goal_target_date(target_date: str) -> date | None:
         return date.fromisoformat(target_date)
     except ValueError as exc:
         raise ValueError("target_date must be in YYYY-MM-DD format.") from exc
+
+
+def _parse_calendar_date(value: str, field_name: str) -> date:
+    """Parse a required ISO date string for calendar range tools."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be in YYYY-MM-DD format.") from exc
+
+
+async def _get_google_user(session, user_id: int, service_name: str):
+    """Load a user and verify the requested Google integration is connected."""
+    user = await session.get(User, user_id)
+    if user is None:
+        return None, {"success": False, "error": "User not found."}
+
+    scopes = user.google_granted_scopes or ""
+    if service_name not in scopes:
+        display_name = "Google Calendar" if service_name == "calendar" else "Gmail"
+        return None, {
+            "success": False,
+            "error": f"{display_name} is not connected. Please connect it first.",
+        }
+
+    return user, None
 
 
 def register_voice_tools(
@@ -776,6 +802,591 @@ def register_voice_tools(
                 {"success": False, "error": "Failed to delete goal"}
             )
 
+    # ── Google Calendar tools ────────────────────────────────────────
+
+    async def get_todays_calendar(params: FunctionCallParams):
+        """Fetch today's calendar events for the user.
+
+        Invocation Condition: Call when the user asks about today's schedule
+        or when calendar context would help the conversation.
+        """
+        try:
+            from app.services.google_calendar_read_service import (
+                fetch_todays_events,
+                format_events_for_agent,
+            )
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "calendar")
+                if error:
+                    await params.result_callback(error)
+                    return
+                events = await fetch_todays_events(user, session)
+
+            if isinstance(events, dict) and "error" in events:
+                await params.result_callback({"success": False, **events})
+                return
+
+            await params.result_callback(
+                {
+                    "success": True,
+                    "events": events,
+                    "summary": format_events_for_agent(events, user.timezone or "UTC"),
+                    "count": len(events),
+                }
+            )
+        except Exception:
+            logger.exception("get_todays_calendar failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to fetch calendar"}
+            )
+
+    async def get_events_for_date_range(
+        params: FunctionCallParams,
+        start_date: str,
+        end_date: str,
+    ):
+        """Fetch calendar events for an inclusive local date range.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format.
+            end_date: End date in YYYY-MM-DD format.
+        """
+        try:
+            from app.services.google_calendar_read_service import (
+                fetch_events_for_range,
+                format_events_for_agent,
+            )
+
+            parsed_start = _parse_calendar_date(start_date, "start_date")
+            parsed_end = _parse_calendar_date(end_date, "end_date")
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "calendar")
+                if error:
+                    await params.result_callback(error)
+                    return
+                events = await fetch_events_for_range(
+                    user,
+                    session,
+                    start_date=parsed_start,
+                    end_date=parsed_end,
+                )
+
+            if isinstance(events, dict) and "error" in events:
+                await params.result_callback({"success": False, **events})
+                return
+
+            await params.result_callback(
+                {
+                    "success": True,
+                    "events": events,
+                    "summary": format_events_for_agent(events, user.timezone or "UTC"),
+                    "count": len(events),
+                }
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception(
+                "get_events_for_date_range failed for user_id=%d", user_id
+            )
+            await params.result_callback(
+                {"success": False, "error": "Failed to fetch calendar events"}
+            )
+
+    async def suggest_calendar_time_block(
+        params: FunctionCallParams,
+        task_title: str,
+        duration_minutes: int,
+    ):
+        """Find an available calendar gap for a task time block."""
+        try:
+            from datetime import timedelta
+
+            from app.services.google_calendar_write_service import find_available_gaps
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "calendar")
+                if error:
+                    await params.result_callback(error)
+                    return
+                gaps = await find_available_gaps(
+                    user,
+                    session,
+                    min_duration_minutes=duration_minutes,
+                )
+
+            if isinstance(gaps, dict) and "error" in gaps:
+                await params.result_callback({"success": False, **gaps})
+                return
+            if not gaps:
+                await params.result_callback(
+                    {
+                        "success": True,
+                        "has_suggestion": False,
+                        "message": "No available time gaps found today.",
+                    }
+                )
+                return
+
+            for gap in gaps:
+                if gap["duration_minutes"] >= duration_minutes:
+                    start = datetime.fromisoformat(gap["start"])
+                    end = start + timedelta(minutes=duration_minutes)
+                    await params.result_callback(
+                        {
+                            "success": True,
+                            "has_suggestion": True,
+                            "suggested_start": start.isoformat(),
+                            "suggested_end": end.isoformat(),
+                            "duration_minutes": duration_minutes,
+                            "task_title": task_title,
+                        }
+                    )
+                    return
+
+            largest = max(gaps, key=lambda g: g["duration_minutes"])
+            await params.result_callback(
+                {
+                    "success": True,
+                    "has_suggestion": True,
+                    "suggested_start": largest["start"],
+                    "suggested_end": largest["end"],
+                    "duration_minutes": largest["duration_minutes"],
+                    "task_title": task_title,
+                }
+            )
+        except Exception:
+            logger.exception(
+                "suggest_calendar_time_block failed for user_id=%d", user_id
+            )
+            await params.result_callback(
+                {"success": False, "error": "Failed to suggest calendar time block"}
+            )
+
+    async def create_calendar_time_block(
+        params: FunctionCallParams,
+        task_title: str,
+        start_iso: str,
+        end_iso: str,
+        task_id: str = "",
+    ):
+        """Create a calendar time block for a task after the user agrees."""
+        try:
+            from app.services.google_calendar_write_service import create_time_block
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "calendar")
+                if error:
+                    await params.result_callback(error)
+                    return
+                result = await create_time_block(
+                    user,
+                    session,
+                    task_title=task_title,
+                    start_iso=start_iso,
+                    end_iso=end_iso,
+                    task_id=task_id or None,
+                )
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except Exception:
+            logger.exception(
+                "create_calendar_time_block failed for user_id=%d", user_id
+            )
+            await params.result_callback(
+                {"success": False, "error": "Failed to create calendar time block"}
+            )
+
+    async def create_calendar_event(
+        params: FunctionCallParams,
+        summary: str,
+        start_iso: str,
+        end_iso: str,
+        description: str = "",
+    ):
+        """Create a general calendar event."""
+        try:
+            from app.services.google_calendar_write_service import create_event
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "calendar")
+                if error:
+                    await params.result_callback(error)
+                    return
+                result = await create_event(
+                    user,
+                    session,
+                    summary=summary,
+                    start_iso=start_iso,
+                    end_iso=end_iso,
+                    description=description or None,
+                )
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("create_calendar_event failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to create calendar event"}
+            )
+
+    async def update_calendar_event(
+        params: FunctionCallParams,
+        event_id: str,
+        summary: str = "",
+        start_iso: str = "",
+        end_iso: str = "",
+        description: str = "",
+    ):
+        """Update a calendar event's title, time, or description."""
+        try:
+            from app.services.google_calendar_write_service import update_event
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "calendar")
+                if error:
+                    await params.result_callback(error)
+                    return
+                result = await update_event(
+                    user,
+                    session,
+                    event_id=event_id,
+                    summary=summary or None,
+                    start_iso=start_iso or None,
+                    end_iso=end_iso or None,
+                    description=description or None,
+                )
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("update_calendar_event failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to update calendar event"}
+            )
+
+    async def delete_calendar_event(
+        params: FunctionCallParams,
+        event_id: str,
+    ):
+        """Delete a calendar event after clear user confirmation."""
+        try:
+            from app.services.google_calendar_write_service import delete_event
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "calendar")
+                if error:
+                    await params.result_callback(error)
+                    return
+                result = await delete_event(user, session, event_id=event_id)
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("delete_calendar_event failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to delete calendar event"}
+            )
+
+    # ── Gmail tools ──────────────────────────────────────────────────
+
+    async def check_emails_needing_reply(params: FunctionCallParams):
+        """Check for recent inbox emails that likely need a reply."""
+        try:
+            from app.services.gmail_read_service import (
+                format_emails_for_agent,
+                get_emails_needing_reply,
+            )
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "gmail")
+                if error:
+                    await params.result_callback(error)
+                    return
+                emails = await get_emails_needing_reply(user, session, max_results=3)
+
+            if isinstance(emails, dict) and "error" in emails:
+                await params.result_callback({"success": False, **emails})
+                return
+
+            await params.result_callback(
+                {
+                    "success": True,
+                    "emails": emails,
+                    "summary": format_emails_for_agent(emails),
+                    "count": len(emails),
+                }
+            )
+        except Exception:
+            logger.exception("check_emails_needing_reply failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to check Gmail"}
+            )
+
+    async def get_email_for_reply(
+        params: FunctionCallParams,
+        message_id: str,
+    ):
+        """Fetch a specific email's full content for drafting a reply."""
+        try:
+            from app.services.gmail_read_service import (
+                get_email_for_reply as _get_email_for_reply,
+            )
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "gmail")
+                if error:
+                    await params.result_callback(error)
+                    return
+                result = await _get_email_for_reply(
+                    user,
+                    session,
+                    message_id=message_id,
+                )
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except Exception:
+            logger.exception("get_email_for_reply failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to fetch email"}
+            )
+
+    async def search_emails(
+        params: FunctionCallParams,
+        query: str,
+        max_results: int = 5,
+    ):
+        """Search Gmail and return matching email summaries."""
+        try:
+            from app.services.gmail_read_service import search_emails as _search_emails
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "gmail")
+                if error:
+                    await params.result_callback(error)
+                    return
+                emails = await _search_emails(
+                    user,
+                    session,
+                    query=query,
+                    max_results=max_results,
+                )
+
+            if isinstance(emails, dict) and "error" in emails:
+                await params.result_callback({"success": False, **emails})
+                return
+
+            await params.result_callback(
+                {"success": True, "emails": emails, "count": len(emails)}
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("search_emails failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to search Gmail"}
+            )
+
+    async def read_email(
+        params: FunctionCallParams,
+        query: str,
+    ):
+        """Search for an email and return the top match's full content."""
+        try:
+            from app.services.gmail_read_service import read_email_by_query
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "gmail")
+                if error:
+                    await params.result_callback(error)
+                    return
+                result = await read_email_by_query(user, session, query=query)
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("read_email failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to read email"}
+            )
+
+    async def save_email_draft(
+        params: FunctionCallParams,
+        thread_id: str,
+        original_email_id: str,
+        original_from: str,
+        original_subject: str,
+        original_message_id: str,
+        draft_text: str,
+    ):
+        """Save a Gmail reply draft for review."""
+        try:
+            from app.services.email_draft_service import EmailDraftService
+
+            async with async_session_factory() as session:
+                svc = EmailDraftService(session)
+                draft = await svc.create_draft(
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    original_email_id=original_email_id,
+                    original_from=original_from,
+                    original_subject=original_subject,
+                    original_message_id=original_message_id,
+                    draft_text=draft_text,
+                )
+
+            await params.result_callback(
+                {
+                    "success": True,
+                    "status": "draft_saved",
+                    "draft_id": draft.id,
+                    "thread_id": draft.thread_id,
+                    "subject": draft.original_subject,
+                }
+            )
+        except Exception:
+            logger.exception("save_email_draft failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to save email draft"}
+            )
+
+    async def update_email_draft(
+        params: FunctionCallParams,
+        draft_id: int,
+        new_draft_text: str,
+    ):
+        """Update a pending Gmail reply draft."""
+        try:
+            from app.services.email_draft_service import EmailDraftService
+
+            async with async_session_factory() as session:
+                svc = EmailDraftService(session)
+                draft = await svc.update_draft(draft_id, new_draft_text, user_id)
+
+            await params.result_callback(
+                {
+                    "success": True,
+                    "status": "draft_updated",
+                    "draft_id": draft.id,
+                    "revision_count": draft.revision_count,
+                }
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("update_email_draft failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to update email draft"}
+            )
+
+    async def send_approved_reply(
+        params: FunctionCallParams,
+        draft_id: int,
+    ):
+        """Send an approved Gmail reply draft."""
+        try:
+            from app.services.email_draft_service import EmailDraftService
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "gmail")
+                if error:
+                    await params.result_callback(error)
+                    return
+                svc = EmailDraftService(session)
+                result = await svc.approve_draft(draft_id, user)
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("send_approved_reply failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to send approved reply"}
+            )
+
+    async def compose_email(
+        params: FunctionCallParams,
+        to_address: str,
+        subject: str,
+        body_text: str,
+    ):
+        """Send a new email after the user approves recipient, subject, and body."""
+        try:
+            from app.services.gmail_write_service import send_new_email
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "gmail")
+                if error:
+                    await params.result_callback(error)
+                    return
+                result = await send_new_email(
+                    user=user,
+                    session=session,
+                    to_address=to_address,
+                    subject=subject,
+                    body_text=body_text,
+                )
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("compose_email failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to compose email"}
+            )
+
+    async def archive_email(
+        params: FunctionCallParams,
+        message_id: str,
+    ):
+        """Archive an email after clear user confirmation."""
+        try:
+            from app.services.gmail_write_service import archive_email as _archive_email
+
+            async with async_session_factory() as session:
+                user, error = await _get_google_user(session, user_id, "gmail")
+                if error:
+                    await params.result_callback(error)
+                    return
+                result = await _archive_email(
+                    user=user,
+                    session=session,
+                    message_id=message_id,
+                )
+
+            await params.result_callback(
+                {"success": "error" not in result, **result}
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("archive_email failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to archive email"}
+            )
+
     # ── Call management tools ────────────────────────────────────────
 
     async def schedule_callback(
@@ -971,6 +1582,22 @@ def register_voice_tools(
         complete_goal,
         abandon_goal,
         delete_goal,
+        get_todays_calendar,
+        get_events_for_date_range,
+        suggest_calendar_time_block,
+        create_calendar_time_block,
+        create_calendar_event,
+        update_calendar_event,
+        delete_calendar_event,
+        check_emails_needing_reply,
+        get_email_for_reply,
+        search_emails,
+        read_email,
+        save_email_draft,
+        update_email_draft,
+        send_approved_reply,
+        compose_email,
+        archive_email,
         schedule_callback,
         skip_call,
         reschedule_call,
@@ -995,6 +1622,15 @@ def register_voice_tools(
         "complete_goal",
         "abandon_goal",
         "delete_goal",
+        "create_calendar_time_block",
+        "create_calendar_event",
+        "update_calendar_event",
+        "delete_calendar_event",
+        "save_email_draft",
+        "update_email_draft",
+        "send_approved_reply",
+        "compose_email",
+        "archive_email",
         "schedule_callback",
         "skip_call",
         "reschedule_call",

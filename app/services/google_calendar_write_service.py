@@ -31,6 +31,35 @@ def _build_calendar_service(credentials: Any) -> Any:
     return build("calendar", "v3", credentials=credentials, cache_discovery=False)
 
 
+def _parse_iso_datetime(value: str, field_name: str) -> datetime:
+    """Parse an ISO/RFC3339 datetime string for validation."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a valid ISO 8601 datetime.") from exc
+
+
+def _validate_time_range(start_iso: str, end_iso: str) -> None:
+    """Validate that start and end datetimes parse and end after start."""
+    start_dt = _parse_iso_datetime(start_iso, "start_iso")
+    end_dt = _parse_iso_datetime(end_iso, "end_iso")
+    try:
+        if end_dt <= start_dt:
+            raise ValueError("end_iso must be after start_iso.")
+    except TypeError as exc:
+        raise ValueError(
+            "start_iso and end_iso must both include timezone offsets or both omit them."
+        ) from exc
+
+
+def _clean_required_text(value: str, field_name: str) -> str:
+    """Return stripped text or raise a user-facing validation error."""
+    clean = value.strip()
+    if not clean:
+        raise ValueError(f"{field_name} cannot be empty.")
+    return clean
+
+
 def generate_calendar_event_id(
     user_id: int,
     task_title: str,
@@ -47,7 +76,7 @@ def generate_calendar_event_id(
     raw = f"charuai:{user_id}:{task_title}:{date_str}"
     digest = hashlib.sha256(raw.encode("utf-8")).digest()
     b32 = base64.b32hexencode(digest).decode().lower().rstrip("=")
-    # Truncate to 32 chars — plenty unique and well within the 5–1024 range.
+    # Truncate to 32 chars: plenty unique and well within the 5-1024 range.
     return b32[:32]
 
 
@@ -255,6 +284,161 @@ async def create_time_block(
 
     # Success — event was created.
     return _event_response(result, status="created")
+
+
+async def create_event(
+    user: User,
+    session: AsyncSession,
+    *,
+    summary: str,
+    start_iso: str,
+    end_iso: str,
+    description: str | None = None,
+) -> dict:
+    """Create a general Google Calendar event.
+
+    This is distinct from ``create_time_block``: it lets Google generate the
+    event ID and does not use Charu task-block metadata.
+    """
+    if not user.timezone:
+        return {"error": "no_timezone", "message": "User timezone is not set."}
+
+    clean_summary = _clean_required_text(summary, "summary")
+    _validate_time_range(start_iso, end_iso)
+
+    credentials = build_google_credentials(
+        access_token_encrypted=user.google_access_token_encrypted,
+        refresh_token_encrypted=user.google_refresh_token_encrypted,
+        token_expiry=user.google_token_expiry,
+    )
+    service = _build_calendar_service(credentials)
+
+    event_body: dict[str, Any] = {
+        "summary": clean_summary,
+        "start": {"dateTime": start_iso, "timeZone": user.timezone},
+        "end": {"dateTime": end_iso, "timeZone": user.timezone},
+        "source": {"title": "Charu AI", "url": "https://charu.ai"},
+    }
+    clean_description = (description or "").strip()
+    if clean_description:
+        event_body["description"] = clean_description
+
+    result = await google_api_call(
+        user=user,
+        credentials=credentials,
+        api_callable=lambda: service.events().insert(
+            calendarId="primary",
+            body=event_body,
+            sendUpdates="none",
+        ).execute(),
+        session=session,
+    )
+
+    if isinstance(result, dict) and "error" in result:
+        return result
+
+    return _event_response(result, status="created")
+
+
+async def update_event(
+    user: User,
+    session: AsyncSession,
+    *,
+    event_id: str,
+    summary: str | None = None,
+    start_iso: str | None = None,
+    end_iso: str | None = None,
+    description: str | None = None,
+) -> dict:
+    """Patch an existing Google Calendar event."""
+    if not user.timezone:
+        return {"error": "no_timezone", "message": "User timezone is not set."}
+
+    clean_event_id = _clean_required_text(event_id, "event_id")
+    if (
+        summary is None
+        and start_iso is None
+        and end_iso is None
+        and description is None
+    ):
+        raise ValueError(
+            "At least one of summary, start_iso, end_iso, or description "
+            "must be provided."
+        )
+
+    event_body: dict[str, Any] = {}
+    if summary is not None:
+        event_body["summary"] = _clean_required_text(summary, "summary")
+    if description is not None:
+        event_body["description"] = description.strip()
+    if start_iso is not None:
+        _parse_iso_datetime(start_iso, "start_iso")
+        event_body["start"] = {"dateTime": start_iso, "timeZone": user.timezone}
+    if end_iso is not None:
+        _parse_iso_datetime(end_iso, "end_iso")
+        event_body["end"] = {"dateTime": end_iso, "timeZone": user.timezone}
+    if start_iso is not None and end_iso is not None:
+        _validate_time_range(start_iso, end_iso)
+
+    credentials = build_google_credentials(
+        access_token_encrypted=user.google_access_token_encrypted,
+        refresh_token_encrypted=user.google_refresh_token_encrypted,
+        token_expiry=user.google_token_expiry,
+    )
+    service = _build_calendar_service(credentials)
+
+    result = await google_api_call(
+        user=user,
+        credentials=credentials,
+        api_callable=lambda: service.events().patch(
+            calendarId="primary",
+            eventId=clean_event_id,
+            body=event_body,
+            sendUpdates="none",
+        ).execute(),
+        session=session,
+    )
+
+    if isinstance(result, dict) and "error" in result:
+        return result
+
+    return _event_response(result, status="updated")
+
+
+async def delete_event(
+    user: User,
+    session: AsyncSession,
+    *,
+    event_id: str,
+) -> dict:
+    """Delete an event from the user's primary Google Calendar."""
+    if not user.timezone:
+        return {"error": "no_timezone", "message": "User timezone is not set."}
+
+    clean_event_id = _clean_required_text(event_id, "event_id")
+
+    credentials = build_google_credentials(
+        access_token_encrypted=user.google_access_token_encrypted,
+        refresh_token_encrypted=user.google_refresh_token_encrypted,
+        token_expiry=user.google_token_expiry,
+    )
+    service = _build_calendar_service(credentials)
+
+    result = await google_api_call(
+        user=user,
+        credentials=credentials,
+        api_callable=lambda: service.events().delete(
+            calendarId="primary",
+            eventId=clean_event_id,
+            sendUpdates="none",
+        ).execute(),
+        session=session,
+    )
+
+    if isinstance(result, dict) and "error" in result:
+        return result
+
+    return {"status": "deleted", "event_id": clean_event_id}
 
 
 async def _handle_conflict(

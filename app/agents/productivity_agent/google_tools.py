@@ -11,8 +11,10 @@ gmail_read_service. Gmail draft tools delegate to EmailDraftService.
 These functions are added directly to the agent's ``tools`` list —
 ADK auto-wraps them as FunctionTool instances.
 
-Validates: Requirements 10, 11, 17, 18
+Validates: Requirements 8, 9, 10, 11, 17, 18
 """
+
+from datetime import date
 
 from google.adk.tools import ToolContext
 
@@ -27,8 +29,16 @@ async def _resolve_user(phone: str):
         return await svc.get_by_phone(phone)
 
 
+def _parse_date(value: str, field_name: str) -> date:
+    """Parse an ISO date string for calendar range tools."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be in YYYY-MM-DD format.") from exc
+
+
 # ---------------------------------------------------------------------------
-# Google Calendar tools (Requirements 10, 17)
+# Google Calendar tools (Requirements 8, 10, 17)
 # ---------------------------------------------------------------------------
 
 
@@ -136,8 +146,8 @@ async def create_calendar_time_block(
     task_title: str,
     start_iso: str,
     end_iso: str,
-    task_id: str | None,
     tool_context: ToolContext,
+    task_id: str = "",
 ) -> dict:
     """Create a time block on the user's Google Calendar for a task.
 
@@ -171,14 +181,182 @@ async def create_calendar_time_block(
             task_title=task_title,
             start_iso=start_iso,
             end_iso=end_iso,
-            task_id=task_id,
+            task_id=task_id or None,
         )
 
     return result
 
 
+async def get_events_for_date_range(
+    start_date: str,
+    end_date: str,
+    tool_context: ToolContext,
+) -> dict:
+    """Fetch calendar events for an inclusive local date range.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format.
+        end_date: End date in YYYY-MM-DD format.
+    """
+    phone = tool_context.state.get("phone")
+    if not phone:
+        return {"error": "No phone number in session state."}
+
+    user = await _resolve_user(phone)
+    if not user:
+        return {"error": "User not found."}
+
+    scopes = (user.google_granted_scopes or "")
+    if "calendar" not in scopes:
+        return {"error": "Google Calendar is not connected. Please connect it first."}
+
+    from app.services.google_calendar_read_service import (
+        fetch_events_for_range,
+        format_events_for_agent,
+    )
+
+    try:
+        parsed_start = _parse_date(start_date, "start_date")
+        parsed_end = _parse_date(end_date, "end_date")
+        async with async_session_factory() as session:
+            result = await fetch_events_for_range(
+                user,
+                session,
+                start_date=parsed_start,
+                end_date=parsed_end,
+            )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    if isinstance(result, dict) and "error" in result:
+        return result
+
+    summary = format_events_for_agent(result, user.timezone or "UTC")
+    return {"events": result, "summary": summary, "count": len(result)}
+
+
+async def create_calendar_event(
+    summary: str,
+    start_iso: str,
+    end_iso: str,
+    tool_context: ToolContext,
+    description: str = "",
+) -> dict:
+    """Create a general Google Calendar event.
+
+    Args:
+        summary: Event title.
+        start_iso: ISO 8601/RFC3339 start datetime.
+        end_iso: ISO 8601/RFC3339 end datetime.
+        description: Optional event description.
+    """
+    phone = tool_context.state.get("phone")
+    if not phone:
+        return {"error": "No phone number in session state."}
+
+    user = await _resolve_user(phone)
+    if not user:
+        return {"error": "User not found."}
+
+    scopes = (user.google_granted_scopes or "")
+    if "calendar" not in scopes:
+        return {"error": "Google Calendar is not connected. Please connect it first."}
+
+    from app.services.google_calendar_write_service import create_event
+
+    try:
+        async with async_session_factory() as session:
+            return await create_event(
+                user,
+                session,
+                summary=summary,
+                start_iso=start_iso,
+                end_iso=end_iso,
+                description=description or None,
+            )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+async def update_calendar_event(
+    event_id: str,
+    tool_context: ToolContext,
+    *,
+    summary: str = "",
+    start_iso: str = "",
+    end_iso: str = "",
+    description: str = "",
+) -> dict:
+    """Update an existing Google Calendar event.
+
+    Args:
+        event_id: Google Calendar event ID.
+        summary: Optional new event title.
+        start_iso: Optional new start datetime.
+        end_iso: Optional new end datetime.
+        description: Optional new description.
+    """
+    phone = tool_context.state.get("phone")
+    if not phone:
+        return {"error": "No phone number in session state."}
+
+    user = await _resolve_user(phone)
+    if not user:
+        return {"error": "User not found."}
+
+    scopes = (user.google_granted_scopes or "")
+    if "calendar" not in scopes:
+        return {"error": "Google Calendar is not connected. Please connect it first."}
+
+    from app.services.google_calendar_write_service import update_event
+
+    try:
+        async with async_session_factory() as session:
+            return await update_event(
+                user,
+                session,
+                event_id=event_id,
+                summary=summary or None,
+                start_iso=start_iso or None,
+                end_iso=end_iso or None,
+                description=description or None,
+            )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+async def delete_calendar_event(
+    event_id: str,
+    tool_context: ToolContext,
+) -> dict:
+    """Delete an event from the user's primary Google Calendar.
+
+    Args:
+        event_id: Google Calendar event ID.
+    """
+    phone = tool_context.state.get("phone")
+    if not phone:
+        return {"error": "No phone number in session state."}
+
+    user = await _resolve_user(phone)
+    if not user:
+        return {"error": "User not found."}
+
+    scopes = (user.google_granted_scopes or "")
+    if "calendar" not in scopes:
+        return {"error": "Google Calendar is not connected. Please connect it first."}
+
+    from app.services.google_calendar_write_service import delete_event
+
+    try:
+        async with async_session_factory() as session:
+            return await delete_event(user, session, event_id=event_id)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
 # ---------------------------------------------------------------------------
-# Gmail read tools (Requirement 11)
+# Gmail read tools (Requirements 9, 11)
 # ---------------------------------------------------------------------------
 
 
@@ -203,8 +381,8 @@ async def check_emails_needing_reply(
         return {"error": "Gmail is not connected. Please connect it first."}
 
     from app.services.gmail_read_service import (
-        get_emails_needing_reply,
         format_emails_for_agent,
+        get_emails_needing_reply,
     )
 
     async with async_session_factory() as session:
@@ -251,9 +429,158 @@ async def get_email_for_reply(
     return result
 
 
+async def search_emails(
+    query: str,
+    tool_context: ToolContext,
+    max_results: int = 5,
+) -> dict:
+    """Search Gmail and return matching email summaries.
+
+    Args:
+        query: Gmail search query.
+        max_results: Maximum number of summaries to return, 1-10.
+    """
+    phone = tool_context.state.get("phone")
+    if not phone:
+        return {"error": "No phone number in session state."}
+
+    user = await _resolve_user(phone)
+    if not user:
+        return {"error": "User not found."}
+
+    scopes = (user.google_granted_scopes or "")
+    if "gmail" not in scopes:
+        return {"error": "Gmail is not connected. Please connect it first."}
+
+    from app.services.gmail_read_service import search_emails as _search_emails
+
+    try:
+        async with async_session_factory() as session:
+            result = await _search_emails(
+                user,
+                session,
+                query=query,
+                max_results=max_results,
+            )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    if isinstance(result, dict) and "error" in result:
+        return result
+
+    return {"emails": result, "count": len(result)}
+
+
+async def read_email(
+    query: str,
+    tool_context: ToolContext,
+) -> dict:
+    """Search for an email and return the top match's full content.
+
+    Args:
+        query: Gmail search query, subject, sender, or description.
+    """
+    phone = tool_context.state.get("phone")
+    if not phone:
+        return {"error": "No phone number in session state."}
+
+    user = await _resolve_user(phone)
+    if not user:
+        return {"error": "User not found."}
+
+    scopes = (user.google_granted_scopes or "")
+    if "gmail" not in scopes:
+        return {"error": "Gmail is not connected. Please connect it first."}
+
+    from app.services.gmail_read_service import read_email_by_query
+
+    try:
+        async with async_session_factory() as session:
+            return await read_email_by_query(user, session, query=query)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
 # ---------------------------------------------------------------------------
-# Gmail draft tools (Requirement 18) — delegate to EmailDraftService
+# Gmail write/draft tools (Requirements 9, 18)
 # ---------------------------------------------------------------------------
+
+
+async def compose_email(
+    to_address: str,
+    subject: str,
+    body_text: str,
+    tool_context: ToolContext,
+) -> dict:
+    """Send a new email from the user's Gmail.
+
+    Only call this after the user explicitly approves the recipient, subject,
+    and body.
+
+    Args:
+        to_address: Recipient email address.
+        subject: Email subject.
+        body_text: Email body text.
+    """
+    phone = tool_context.state.get("phone")
+    if not phone:
+        return {"error": "No phone number in session state."}
+
+    user = await _resolve_user(phone)
+    if not user:
+        return {"error": "User not found."}
+
+    scopes = (user.google_granted_scopes or "")
+    if "gmail" not in scopes:
+        return {"error": "Gmail is not connected. Please connect it first."}
+
+    from app.services.gmail_write_service import send_new_email
+
+    try:
+        async with async_session_factory() as session:
+            return await send_new_email(
+                user=user,
+                session=session,
+                to_address=to_address,
+                subject=subject,
+                body_text=body_text,
+            )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+async def archive_email(
+    message_id: str,
+    tool_context: ToolContext,
+) -> dict:
+    """Archive an email by removing it from the inbox.
+
+    Args:
+        message_id: Gmail message ID.
+    """
+    phone = tool_context.state.get("phone")
+    if not phone:
+        return {"error": "No phone number in session state."}
+
+    user = await _resolve_user(phone)
+    if not user:
+        return {"error": "User not found."}
+
+    scopes = (user.google_granted_scopes or "")
+    if "gmail" not in scopes:
+        return {"error": "Gmail is not connected. Please connect it first."}
+
+    from app.services.gmail_write_service import archive_email as _archive_email
+
+    try:
+        async with async_session_factory() as session:
+            return await _archive_email(
+                user=user,
+                session=session,
+                message_id=message_id,
+            )
+    except ValueError as exc:
+        return {"error": str(exc)}
 
 
 async def save_email_draft(

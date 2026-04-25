@@ -150,6 +150,16 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: the full-tools spec defines goals as higher-level objectives that span days or weeks, distinct from atomic tasks. ID-based goal mutations avoid fuzzy-match ambiguity, and keeping `CallLog.goal` preserves existing call-summary behavior.
   Source: `.pm/research/79-goal-model-service-tools-implementation.md`
 
+## Calendar And Gmail Tool Decisions
+
+- 2026-04-25: General Calendar events are separate from task time blocks. Event CRUD lets Google generate event IDs, while task time blocks keep deterministic IDs and Charu metadata.
+  Rationale: task blocks need idempotent retry behavior tied to a task and day; general events need normal Calendar semantics for user-managed appointments.
+  Source: `.pm/research/80-calendar-gmail-full-tools-expansion.md`
+
+- 2026-04-25: New outbound Gmail compose is a direct send tool but must be used only after explicit user approval; archive removes the `INBOX` label rather than deleting mail.
+  Rationale: composing a new email is externally visible and should be confirmation-gated, while archive should preserve mail history and match Gmail's non-destructive inbox cleanup behavior.
+  Source: `.pm/research/80-calendar-gmail-full-tools-expansion.md`
+
 ## Tech Stack
 
 - Python 3.10+

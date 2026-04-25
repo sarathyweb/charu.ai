@@ -47,13 +47,21 @@ from .goal_tools import (
     update_goal,
 )
 from .google_tools import (
+    archive_email,
     check_emails_needing_reply,
+    compose_email,
+    create_calendar_event,
     create_calendar_time_block,
+    delete_calendar_event,
     get_email_for_reply,
+    get_events_for_date_range,
     get_todays_calendar,
+    read_email,
     save_email_draft,
+    search_emails,
     send_approved_reply,
     suggest_calendar_time_block,
+    update_calendar_event,
     update_email_draft,
 )
 from .onboarding_agent import onboarding_agent
@@ -120,15 +128,30 @@ _call_window_tools = [
 # ---------------------------------------------------------------------------
 # Google integration tools — thin wrappers around Calendar/Gmail services.
 # ---------------------------------------------------------------------------
+_compose_email_tool = FunctionTool(compose_email, require_confirmation=True)
+_delete_calendar_event_tool = FunctionTool(
+    delete_calendar_event,
+    require_confirmation=True,
+)
+_archive_email_tool = FunctionTool(archive_email, require_confirmation=True)
+
 _google_tools = [
     get_todays_calendar,
+    get_events_for_date_range,
     suggest_calendar_time_block,
     create_calendar_time_block,
+    create_calendar_event,
+    update_calendar_event,
+    _delete_calendar_event_tool,
     check_emails_needing_reply,
     get_email_for_reply,
+    search_emails,
+    read_email,
     save_email_draft,
     update_email_draft,
     send_approved_reply,
+    _compose_email_tool,
+    _archive_email_tool,
 ]
 
 
@@ -355,11 +378,19 @@ Use the right one based on what the user wants.
 
 ## Google Calendar
 - Use **get_todays_calendar** to fetch today's events when relevant.
+- Use **get_events_for_date_range** when the user asks about a specific date \
+or date range.
 - Reference events conversationally: "You have a meeting at 2pm — want to \
 knock out that task before then?"
 - To block time for a task, first call **suggest_calendar_time_block** to \
 find a gap, present the suggestion, then call **create_calendar_time_block** \
 only after the user agrees.
+- Use **create_calendar_event** for general calendar events that are not task \
+time blocks.
+- Use **update_calendar_event** to change an existing event's title, time, or \
+description. Use date-range lookup first if you need the event_id.
+- Use **delete_calendar_event** only after the user clearly confirms they want \
+the event removed.
 - If the user declines a time block, do not ask again during the same \
 conversation.
 
@@ -367,11 +398,19 @@ conversation.
 - Use **check_emails_needing_reply** to surface emails needing attention \
 (max 3 per conversation).
 - Use **get_email_for_reply** to fetch full content before drafting a reply.
+- Use **search_emails** when the user asks to find messages by sender, \
+subject, keyword, or date.
+- Use **read_email** when the user asks what a specific email says and you \
+need the full body of the best matching message.
 - Use **save_email_draft** to persist a draft for WhatsApp review.
 - Use **update_email_draft** for revisions the user requests.
 - NEVER call **send_approved_reply** without explicit user approval of the \
 draft content. Acceptable approvals: "send it", "yes", "looks good", \
 "go ahead", "approve", or similar clear affirmatives.
+- Use **compose_email** for new outbound emails only after the user approves \
+the recipient, subject, and body.
+- Use **archive_email** only after the user clearly confirms which message to \
+archive.
 
 ## Google Search
 Use Google Search when the user asks about recent events, news, \

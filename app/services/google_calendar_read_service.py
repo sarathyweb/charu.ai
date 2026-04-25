@@ -9,7 +9,7 @@ Requirements: 10
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -42,6 +42,66 @@ async def fetch_todays_events(
     if not user.timezone:
         return {"error": "no_timezone", "message": "User timezone is not set."}
 
+    tz = ZoneInfo(user.timezone)
+    now_local = datetime.now(tz)
+    start_of_day = datetime.combine(now_local.date(), time.min, tzinfo=tz)
+    end_of_day = start_of_day + timedelta(days=1)
+
+    return await _fetch_events_between(
+        user,
+        session,
+        start_dt=start_of_day,
+        end_dt=end_of_day,
+        max_retries=max_retries,
+    )
+
+
+async def fetch_events_for_range(
+    user: User,
+    session: AsyncSession,
+    *,
+    start_date: date,
+    end_date: date,
+    max_results: int = 50,
+    max_retries: int | None = None,
+) -> list[dict] | dict:
+    """Fetch calendar events between two inclusive local dates for *user*.
+
+    Returns a list of raw event dicts on success, or a structured error dict
+    on auth/API failure. Cancelled events and events declined by the
+    authenticated user are filtered out, matching ``fetch_todays_events``.
+    """
+    if not user.timezone:
+        return {"error": "no_timezone", "message": "User timezone is not set."}
+    if end_date < start_date:
+        raise ValueError("end_date must be on or after start_date.")
+    if max_results < 1 or max_results > 250:
+        raise ValueError("max_results must be between 1 and 250.")
+
+    tz = ZoneInfo(user.timezone)
+    start_dt = datetime.combine(start_date, time.min, tzinfo=tz)
+    end_dt = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=tz)
+
+    return await _fetch_events_between(
+        user,
+        session,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        max_results=max_results,
+        max_retries=max_retries,
+    )
+
+
+async def _fetch_events_between(
+    user: User,
+    session: AsyncSession,
+    *,
+    start_dt: datetime,
+    end_dt: datetime,
+    max_results: int = 50,
+    max_retries: int | None = None,
+) -> list[dict] | dict:
+    """Fetch events between two datetimes and apply local filtering rules."""
     credentials = build_google_credentials(
         access_token_encrypted=user.google_access_token_encrypted,
         refresh_token_encrypted=user.google_refresh_token_encrypted,
@@ -50,21 +110,17 @@ async def fetch_todays_events(
 
     service = _build_calendar_service(credentials)
 
-    tz = ZoneInfo(user.timezone)
-    now_local = datetime.now(tz)
-    start_of_day = datetime.combine(now_local.date(), time.min, tzinfo=tz)
-    end_of_day = start_of_day + timedelta(days=1)
-
     result = await google_api_call(
         user=user,
         credentials=credentials,
         api_callable=lambda: service.events().list(
             calendarId="primary",
-            timeMin=start_of_day.isoformat(),
-            timeMax=end_of_day.isoformat(),
+            timeMin=start_dt.isoformat(),
+            timeMax=end_dt.isoformat(),
             singleEvents=True,
             orderBy="startTime",
             timeZone=user.timezone,
+            maxResults=max_results,
         ).execute(),
         session=session,
         max_retries=max_retries,
@@ -135,7 +191,7 @@ def format_events_for_agent(
             if end_dt_str:
                 end_dt = datetime.fromisoformat(end_dt_str).astimezone(tz)
                 end_time_str = end_dt.strftime("%I:%M %p").lstrip("0")
-                lines.append(f"- {time_str}–{end_time_str}: {summary}")
+                lines.append(f"- {time_str}-{end_time_str}: {summary}")
             else:
                 lines.append(f"- {time_str}: {summary}")
         else:

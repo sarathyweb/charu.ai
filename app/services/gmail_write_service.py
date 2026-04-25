@@ -14,6 +14,7 @@ import base64
 import logging
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
+from email.utils import formatdate
 
 from googleapiclient.discovery import build
 from sqlalchemy import select
@@ -56,6 +57,113 @@ def _compose_reply_message(
     message["In-Reply-To"] = original_message_id
     message["References"] = original_message_id
     return message
+
+
+def _clean_required_text(value: str, field_name: str) -> str:
+    """Return stripped text or raise a validation error."""
+    clean = value.strip()
+    if not clean:
+        raise ValueError(f"{field_name} cannot be empty.")
+    return clean
+
+
+def _compose_new_message(
+    *,
+    to_address: str,
+    subject: str,
+    body_text: str,
+) -> MIMEText:
+    """Compose a new outbound email message."""
+    message = MIMEText(body_text, _charset="utf-8")
+    message["to"] = to_address
+    message["subject"] = subject
+    message["date"] = formatdate(localtime=True)
+    return message
+
+
+async def send_new_email(
+    *,
+    user: User,
+    session: AsyncSession,
+    to_address: str,
+    subject: str,
+    body_text: str,
+) -> dict:
+    """Send a new Gmail message that is not a reply."""
+    clean_to = _clean_required_text(to_address, "to_address")
+    clean_subject = _clean_required_text(subject, "subject")
+    clean_body = _clean_required_text(body_text, "body_text")
+
+    credentials = build_google_credentials(
+        access_token_encrypted=user.google_access_token_encrypted,
+        refresh_token_encrypted=user.google_refresh_token_encrypted,
+        token_expiry=user.google_token_expiry,
+    )
+    service = _build_gmail_service(credentials)
+
+    mime_msg = _compose_new_message(
+        to_address=clean_to,
+        subject=clean_subject,
+        body_text=clean_body,
+    )
+    raw = base64.urlsafe_b64encode(mime_msg.as_bytes()).decode("utf-8")
+
+    send_result = await google_api_call(
+        user=user,
+        credentials=credentials,
+        api_callable=lambda: service.users().messages().send(
+            userId="me",
+            body={"raw": raw},
+        ).execute(),
+        session=session,
+    )
+
+    if isinstance(send_result, dict) and "error" in send_result:
+        return send_result
+
+    return {
+        "status": "sent",
+        "gmail_message_id": send_result.get("id", ""),
+        "thread_id": send_result.get("threadId", ""),
+        "message": f"Email sent to {clean_to}.",
+    }
+
+
+async def archive_email(
+    *,
+    user: User,
+    session: AsyncSession,
+    message_id: str,
+) -> dict:
+    """Archive a Gmail message by removing the INBOX label."""
+    clean_message_id = _clean_required_text(message_id, "message_id")
+
+    credentials = build_google_credentials(
+        access_token_encrypted=user.google_access_token_encrypted,
+        refresh_token_encrypted=user.google_refresh_token_encrypted,
+        token_expiry=user.google_token_expiry,
+    )
+    service = _build_gmail_service(credentials)
+
+    result = await google_api_call(
+        user=user,
+        credentials=credentials,
+        api_callable=lambda: service.users().messages().modify(
+            userId="me",
+            id=clean_message_id,
+            body={"removeLabelIds": ["INBOX"]},
+        ).execute(),
+        session=session,
+    )
+
+    if isinstance(result, dict) and "error" in result:
+        return result
+
+    return {
+        "status": "archived",
+        "message_id": result.get("id", clean_message_id),
+        "thread_id": result.get("threadId", ""),
+    }
 
 
 async def send_approved_reply(
@@ -103,7 +211,7 @@ async def send_approved_reply(
     )
     # Use session.execute() + scalars() instead of session.exec() because
     # session.exec() with with_for_update() may return a Row instead of the model.
-    raw_result = await session.execute(stmt)  # noqa: WPS442
+    raw_result = await session.execute(stmt)
     draft: EmailDraftState | None = raw_result.scalars().first()
 
     if draft is None:

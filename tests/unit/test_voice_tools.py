@@ -39,6 +39,12 @@ async def _create_user(session: AsyncSession) -> User:
         phone="+15551234567",
         timezone="America/New_York",
         onboarding_complete=True,
+        google_access_token_encrypted="access",
+        google_refresh_token_encrypted="refresh",
+        google_granted_scopes=(
+            "https://www.googleapis.com/auth/calendar "
+            "https://www.googleapis.com/auth/gmail.modify"
+        ),
     )
     session.add(user)
     await session.commit()
@@ -82,8 +88,24 @@ def test_voice_tool_registration_includes_task_parity_tools():
         "complete_goal",
         "abandon_goal",
         "delete_goal",
+        "get_todays_calendar",
+        "get_events_for_date_range",
+        "suggest_calendar_time_block",
+        "create_calendar_time_block",
+        "create_calendar_event",
+        "update_calendar_event",
+        "delete_calendar_event",
+        "check_emails_needing_reply",
+        "get_email_for_reply",
+        "search_emails",
+        "read_email",
+        "save_email_draft",
+        "update_email_draft",
+        "send_approved_reply",
+        "compose_email",
+        "archive_email",
     }.issubset(llm.functions)
-    assert len(llm.functions) == 20
+    assert len(llm.functions) == 36
 
 
 def test_voice_mutating_tools_are_not_cancelled_on_interruption():
@@ -103,6 +125,15 @@ def test_voice_mutating_tools_are_not_cancelled_on_interruption():
         "complete_goal",
         "abandon_goal",
         "delete_goal",
+        "create_calendar_time_block",
+        "create_calendar_event",
+        "update_calendar_event",
+        "delete_calendar_event",
+        "save_email_draft",
+        "update_email_draft",
+        "send_approved_reply",
+        "compose_email",
+        "archive_email",
         "schedule_callback",
         "skip_call",
         "reschedule_call",
@@ -115,6 +146,13 @@ def test_voice_mutating_tools_are_not_cancelled_on_interruption():
         llm.registration_options["list_pending_tasks"]["cancel_on_interruption"] is True
     )
     assert llm.registration_options["list_goals"]["cancel_on_interruption"] is True
+    assert (
+        llm.registration_options["get_events_for_date_range"][
+            "cancel_on_interruption"
+        ]
+        is True
+    )
+    assert llm.registration_options["search_emails"]["cancel_on_interruption"] is True
     assert llm.registration_options["get_next_call"]["cancel_on_interruption"] is True
 
 
@@ -248,6 +286,117 @@ async def test_voice_goal_tools_return_callback_payloads(session):
     assert delete_payload["status"] == "deleted"
 
     assert await session.get(Goal, create_payload["goal_id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_voice_calendar_and_gmail_tools_return_callback_payloads(
+    monkeypatch,
+    session,
+):
+    user = await _create_user(session)
+    llm = _register(user_id=user.id)
+
+    monkeypatch.setattr(
+        "app.services.google_calendar_read_service.fetch_events_for_range",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": "event_1",
+                    "summary": "Planning",
+                    "start": {"dateTime": "2026-05-01T09:00:00-04:00"},
+                    "end": {"dateTime": "2026-05-01T09:30:00-04:00"},
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.google_calendar_write_service.create_event",
+        AsyncMock(return_value={"status": "created", "event_id": "event_1"}),
+    )
+    monkeypatch.setattr(
+        "app.services.gmail_read_service.search_emails",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": "msg_1",
+                    "thread_id": "thread_msg_1",
+                    "subject": "Launch",
+                    "from": "Asha <asha@example.com>",
+                    "date": "",
+                    "snippet": "Snippet",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.gmail_write_service.send_new_email",
+        AsyncMock(
+            return_value={
+                "status": "sent",
+                "gmail_message_id": "sent_1",
+                "thread_id": "thread_1",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.gmail_write_service.archive_email",
+        AsyncMock(return_value={"status": "archived", "message_id": "msg_1"}),
+    )
+
+    range_params = _params()
+    await llm.functions["get_events_for_date_range"](
+        range_params,
+        start_date="2026-05-01",
+        end_date="2026-05-02",
+    )
+    range_payload = range_params.result_callback.await_args.args[0]
+    assert range_payload["success"] is True
+    assert range_payload["count"] == 1
+    assert range_payload["events"][0]["summary"] == "Planning"
+
+    create_event_params = _params()
+    await llm.functions["create_calendar_event"](
+        create_event_params,
+        summary="Planning",
+        start_iso="2026-05-01T09:00:00-04:00",
+        end_iso="2026-05-01T09:30:00-04:00",
+    )
+    create_event_payload = create_event_params.result_callback.await_args.args[0]
+    assert create_event_payload == {
+        "success": True,
+        "status": "created",
+        "event_id": "event_1",
+    }
+
+    search_params = _params()
+    await llm.functions["search_emails"](
+        search_params,
+        query="from:asha launch",
+    )
+    search_payload = search_params.result_callback.await_args.args[0]
+    assert search_payload["success"] is True
+    assert search_payload["count"] == 1
+    assert search_payload["emails"][0]["id"] == "msg_1"
+
+    compose_params = _params()
+    await llm.functions["compose_email"](
+        compose_params,
+        to_address="asha@example.com",
+        subject="Launch",
+        body_text="Let's ship.",
+    )
+    compose_payload = compose_params.result_callback.await_args.args[0]
+    assert compose_payload["success"] is True
+    assert compose_payload["gmail_message_id"] == "sent_1"
+
+    archive_params = _params()
+    await llm.functions["archive_email"](archive_params, message_id="msg_1")
+    archive_payload = archive_params.result_callback.await_args.args[0]
+    assert archive_payload == {
+        "success": True,
+        "status": "archived",
+        "message_id": "msg_1",
+    }
 
 
 @pytest.mark.asyncio
