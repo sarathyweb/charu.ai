@@ -1,7 +1,7 @@
-"""TaskService — fuzzy-dedup task CRUD with pg_trgm similarity.
+"""TaskService — hybrid-dedup task CRUD with pg_trgm and embeddings.
 
 Implements:
-- ``save_task`` — create or merge a task using pg_trgm similarity (threshold 0.6)
+- ``save_task`` — create or merge a task using pg_trgm, then embeddings
 - ``complete_task_by_title`` — fuzzy-match completion (threshold 0.4)
 - ``list_pending_tasks`` — ordered by priority DESC, created_at DESC
 - ``update_task`` / ``delete_task`` — fuzzy-match pending task mutations
@@ -20,22 +20,60 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.config import get_settings
 from app.models.enums import TaskStatus
 from app.models.task import Task
+from app.services.embedding_service import (
+    AzureOpenAIEmbeddingService,
+    TextEmbeddingService,
+    cosine_similarity,
+)
 
 logger = logging.getLogger(__name__)
 
 # Similarity thresholds (pg_trgm)
 SAVE_SIMILARITY_THRESHOLD = 0.6
 COMPLETION_SIMILARITY_THRESHOLD = 0.4
+DEFAULT_EMBEDDING_SIMILARITY_THRESHOLD = 0.88
+DEFAULT_EMBEDDING_BACKFILL_LIMIT = 25
 MAX_TASK_LIST_LIMIT = 50
 
 
 class TaskService:
     """Manages Task lifecycle: creation, mutation, completion, and listing."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        embedding_service: TextEmbeddingService | None = None,
+        enable_embedding_dedup: bool | None = None,
+        embedding_similarity_threshold: float | None = None,
+        embedding_backfill_limit: int | None = None,
+    ) -> None:
         self.session = session
+        settings = get_settings()
+
+        self._embedding_enabled = (
+            settings.TASK_EMBEDDING_DEDUP_ENABLED
+            if enable_embedding_dedup is None
+            else enable_embedding_dedup
+        )
+        self._embedding_threshold = (
+            settings.TASK_EMBEDDING_SIMILARITY_THRESHOLD
+            if embedding_similarity_threshold is None
+            else embedding_similarity_threshold
+        )
+        self._embedding_threshold = min(1.0, max(-1.0, self._embedding_threshold))
+        self._embedding_backfill_limit = max(
+            0,
+            settings.TASK_EMBEDDING_BACKFILL_LIMIT
+            if embedding_backfill_limit is None
+            else embedding_backfill_limit
+        )
+        self._embedding_service = embedding_service
+        if self._embedding_enabled and self._embedding_service is None:
+            self._embedding_service = AzureOpenAIEmbeddingService.from_settings(settings)
 
     # ------------------------------------------------------------------
     # save_task — create or merge with fuzzy dedup
@@ -50,8 +88,10 @@ class TaskService:
     ) -> tuple[Task, bool]:
         """Save a task, deduplicating against existing pending tasks.
 
-        Uses ``pg_trgm`` similarity to detect near-duplicate titles among
-        the user's pending tasks (threshold 0.6).
+        Uses ``pg_trgm`` similarity first to detect near-duplicate titles among
+        the user's pending tasks (threshold 0.6). When semantic dedupe is
+        enabled, it then falls back to Azure OpenAI embeddings and cosine
+        similarity for paraphrases that lexical matching misses.
 
         Cross-source merging rules:
         - Preserve the **earliest** ``created_at``
@@ -62,23 +102,24 @@ class TaskService:
             when a new row was inserted, ``False`` when an existing task
             was merged/updated.
         """
-        # Look for a similar pending task
+        # Look for a similar pending task using the local pg_trgm baseline.
         existing = await self._find_similar_pending(
             user_id, title, SAVE_SIMILARITY_THRESHOLD
         )
 
         if existing is not None:
-            # Merge: keep earliest created_at, highest priority
-            changed = False
-            if priority > existing.priority:
-                existing.priority = priority
-                changed = True
-            # created_at is already the earliest — don't bump it
-            if changed:
-                self.session.add(existing)
-                await self.session.commit()
-                await self.session.refresh(existing)
-            return existing, False
+            return await self._merge_duplicate_task(existing, priority), False
+
+        title_embedding = await self._embed_text_or_none(title)
+        if title_embedding is not None:
+            semantic_match = await self._find_embedding_duplicate_pending(
+                user_id=user_id,
+                query_embedding=title_embedding,
+            )
+            if semantic_match is not None:
+                return await self._merge_duplicate_task(
+                    semantic_match, priority
+                ), False
 
         # No match — create new task
         task = Task(
@@ -86,6 +127,11 @@ class TaskService:
             title=title,
             priority=priority,
             source=source,
+            embedding=title_embedding,
+            embedding_model=self._embedding_model if title_embedding else None,
+            embedding_updated_at=(
+                datetime.now(timezone.utc) if title_embedding else None
+            ),
         )
         self.session.add(task)
         await self.session.commit()
@@ -178,6 +224,7 @@ class TaskService:
 
         if new_title is not None:
             match.title = new_title.strip()
+            await self._refresh_task_embedding(match)
         if new_priority is not None:
             match.priority = new_priority
 
@@ -283,6 +330,7 @@ class TaskService:
 
         if new_title is not None:
             task.title = new_title.strip()
+            await self._refresh_task_embedding(task)
         if new_priority is not None:
             task.priority = new_priority
 
@@ -433,6 +481,135 @@ class TaskService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _merge_duplicate_task(self, existing: Task, priority: int) -> Task:
+        """Merge duplicate task metadata into the existing row."""
+        if priority > existing.priority:
+            existing.priority = priority
+            self.session.add(existing)
+            await self.session.commit()
+            await self.session.refresh(existing)
+        return existing
+
+    @property
+    def _embedding_model(self) -> str | None:
+        if not self._embedding_enabled or self._embedding_service is None:
+            return None
+        model = self._embedding_service.model
+        dimensions = getattr(self._embedding_service, "dimensions", None)
+        if dimensions is None:
+            return model
+        return f"{model}:dimensions={dimensions}"
+
+    async def _embed_text_or_none(self, text: str) -> list[float] | None:
+        """Generate an embedding, falling back silently to lexical behavior."""
+        if not self._embedding_enabled or self._embedding_service is None:
+            return None
+
+        try:
+            return await self._embedding_service.embed_text(text)
+        except Exception:
+            logger.warning(
+                "Task embedding generation failed; using pg_trgm only.",
+                exc_info=True,
+            )
+            return None
+
+    async def _refresh_task_embedding(self, task: Task) -> None:
+        """Refresh a task embedding after its title changes, or clear stale data."""
+        embedding = await self._embed_text_or_none(task.title)
+        if embedding is None:
+            task.embedding = None
+            task.embedding_model = None
+            task.embedding_updated_at = None
+            return
+
+        task.embedding = embedding
+        task.embedding_model = self._embedding_model
+        task.embedding_updated_at = datetime.now(timezone.utc)
+
+    async def _find_embedding_duplicate_pending(
+        self,
+        *,
+        user_id: int,
+        query_embedding: list[float],
+    ) -> Task | None:
+        """Find a pending task whose stored embedding is semantically similar."""
+        model = self._embedding_model
+        if model is None:
+            return None
+
+        await self._reactivate_due_snoozed_tasks(user_id)
+        result = await self.session.exec(
+            select(Task)
+            .where(
+                Task.user_id == user_id,
+                Task.status == TaskStatus.PENDING.value,
+            )
+            .order_by(
+                Task.priority.desc(),  # type: ignore[union-attr]
+                Task.created_at.desc(),  # type: ignore[union-attr]
+            )
+        )
+        candidates = list(result.all())
+        if not candidates:
+            return None
+
+        best_task: Task | None = None
+        best_score = 0.0
+        backfilled = 0
+
+        for task in candidates:
+            candidate_embedding, refreshed = await self._embedding_for_candidate(
+                task=task,
+                model=model,
+                backfill_allowed=backfilled < self._embedding_backfill_limit,
+            )
+            if refreshed:
+                backfilled += 1
+
+            score = cosine_similarity(query_embedding, candidate_embedding)
+            if score > best_score:
+                best_score = score
+                best_task = task
+
+        if backfilled:
+            await self.session.commit()
+
+        if best_task is not None and best_score >= self._embedding_threshold:
+            logger.info(
+                "Semantic task dedupe matched task_id=%s score=%.4f threshold=%.4f",
+                best_task.id,
+                best_score,
+                self._embedding_threshold,
+            )
+            return best_task
+
+        return None
+
+    async def _embedding_for_candidate(
+        self,
+        *,
+        task: Task,
+        model: str,
+        backfill_allowed: bool,
+    ) -> tuple[list[float] | None, bool]:
+        """Return a candidate embedding, lazily refreshing stale/missing vectors."""
+        if task.embedding is not None and task.embedding_model == model:
+            return task.embedding, False
+
+        if not backfill_allowed:
+            return None, False
+
+        embedding = await self._embed_text_or_none(task.title)
+        if embedding is None:
+            return None, False
+
+        task.embedding = embedding
+        task.embedding_model = model
+        task.embedding_updated_at = datetime.now(timezone.utc)
+        self.session.add(task)
+        return embedding, True
 
     async def _find_similar_by_status(
         self,

@@ -194,6 +194,10 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: skip/decline paths alter scheduling semantics and Google-tool availability. They should be specified as a product change with user controls and downstream behavior before changing the production onboarding gate.
   Source: `.pm/research/88-pending-feature-closure-audit.md`
 
+- 2026-04-26: Hybrid task deduplication keeps `pg_trgm` as the first-pass matcher and uses Azure OpenAI embeddings only as an opt-in semantic fallback for task creation.
+  Rationale: trigram matching is local, deterministic, and cheap for obvious duplicates, while embeddings catch paraphrases after user/status filtering. The embedding path is feature-flagged because task titles are sent to Azure OpenAI and incur external API cost.
+  Source: `.pm/research/89-hybrid-embedding-task-deduplication.md`
+
 ## Tech Stack
 
 - Python 3.10+

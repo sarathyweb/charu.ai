@@ -1,8 +1,9 @@
-"""Task SQLModel — user task list with pg_trgm fuzzy dedup support."""
+"""Task SQLModel — user task list with pg_trgm and embedding dedup support."""
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Text
+from sqlalchemy import CheckConstraint, Column, DateTime, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from app.models.enums import TaskSource, TaskStatus
@@ -41,6 +42,18 @@ class Task(TimestampMixin, SQLModel, table=True):
         default=None,
     )
     completed_at: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+        default=None,
+    )
+    embedding: list[float] | None = Field(
+        sa_column=Column(JSONB, nullable=True),
+        default=None,
+    )
+    embedding_model: str | None = Field(
+        sa_column=Column(String(length=128), nullable=True),
+        default=None,
+    )
+    embedding_updated_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True),
         default=None,
     )

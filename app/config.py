@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_CLIENT_SECRET: str = ""
     GOOGLE_OAUTH_REDIRECT_URI: str = ""
 
+    # Azure OpenAI credentials and deployments. Keep real values in .env only.
+    AZURE_OPENAI_API_KEY: str = ""
+    AZURE_OPENAI_ENDPOINT: str = ""
+    AZURE_OPENAI_API_VERSION: str = "2025-03-01-preview"
+    AZURE_OPENAI_MODEL: str = "gpt-5.4"
+    AZURE_OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
+    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int | None = None
+
+    # Semantic task deduplication is opt-in because it sends task text to Azure.
+    TASK_EMBEDDING_DEDUP_ENABLED: bool = False
+    TASK_EMBEDDING_SIMILARITY_THRESHOLD: float = 0.88
+    TASK_EMBEDDING_BACKFILL_LIMIT: int = 25
+
     # Fernet key for encrypting OAuth tokens at rest.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     OAUTH_TOKEN_ENCRYPTION_KEY: str = ""
@@ -67,6 +80,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        env_ignore_empty=True,
     )
 
 

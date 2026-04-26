@@ -26,7 +26,8 @@ User ◄── Voice call ◄── Twilio Media Streams ◄── Pipecat + Gem
 
 - Scheduled accountability voice calls with AI (morning goals, afternoon check-in, evening reflection)
 - On-demand callback requests
-- Task management with fuzzy matching (create, complete, list pending/completed)
+- Task management with fuzzy and optional Azure OpenAI semantic deduplication
+  (create, complete, list pending/completed)
 - Goal capture during accountability calls
 - Google Calendar integration (today/range reads, event CRUD, available gaps, create time blocks)
 - Gmail integration (search/read, compose/send, archive, reviewed reply drafts, send approved replies)
@@ -252,6 +253,16 @@ OAUTH_TOKEN_ENCRYPTION_KEY=GENERATE_NEW_FERNET_KEY
 STREAM_TOKEN_SECRET=GENERATE_NEW_SECRET
 REDIS_URL=redis://localhost:6379/0
 CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+
+# Optional semantic task deduplication through Azure OpenAI embeddings
+TASK_EMBEDDING_DEDUP_ENABLED=false
+AZURE_OPENAI_API_KEY=your_azure_openai_key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2025-03-01-preview
+AZURE_OPENAI_MODEL=gpt-5.4
+AZURE_OPENAI_EMBEDDING_MODEL=text-embedding-3-large
+TASK_EMBEDDING_SIMILARITY_THRESHOLD=0.88
+TASK_EMBEDDING_BACKFILL_LIMIT=25
 ```
 
 Generate secrets:

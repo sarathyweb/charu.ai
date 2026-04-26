@@ -22,6 +22,28 @@ from app.services.task_service import TaskService
 # ---------------------------------------------------------------------------
 
 
+class FakeEmbeddingService:
+    """Deterministic embedding service for task dedupe tests."""
+
+    model = "fake-embedding-model"
+
+    def __init__(
+        self,
+        vectors: dict[str, list[float]] | None = None,
+        *,
+        fail: bool = False,
+    ) -> None:
+        self.vectors = vectors or {}
+        self.fail = fail
+        self.calls: list[str] = []
+
+    async def embed_text(self, text: str) -> list[float]:
+        self.calls.append(text)
+        if self.fail:
+            raise RuntimeError("embedding provider unavailable")
+        return self.vectors.get(text, [0.0, 0.0, 1.0])
+
+
 @pytest_asyncio.fixture
 async def svc(session: AsyncSession) -> TaskService:
     return TaskService(session)
@@ -148,6 +170,114 @@ class TestSaveTask:
         task2, created = await svc.save_task(user.id, "File my taxes")
         assert created is True
         assert task2.id != task1.id
+
+    @pytest.mark.asyncio
+    async def test_embedding_dedup_merges_semantic_paraphrase(self, session):
+        user = await _create_user(session)
+        embeddings = FakeEmbeddingService(
+            {
+                "Call Sam about invoice": [1.0, 0.0, 0.0],
+                "Phone the client about billing": [1.0, 0.0, 0.0],
+            }
+        )
+        svc = TaskService(
+            session,
+            embedding_service=embeddings,
+            enable_embedding_dedup=True,
+            embedding_similarity_threshold=0.95,
+        )
+
+        task1, created1 = await svc.save_task(
+            user.id, "Call Sam about invoice", priority=40
+        )
+        task2, created2 = await svc.save_task(
+            user.id, "Phone the client about billing", priority=90
+        )
+
+        assert created1 is True
+        assert created2 is False
+        assert task2.id == task1.id
+        assert task2.priority == 90
+        assert task2.embedding == [1.0, 0.0, 0.0]
+        assert task2.embedding_model == "fake-embedding-model"
+
+    @pytest.mark.asyncio
+    async def test_embedding_dedup_backfills_existing_task_embedding(self, session):
+        user = await _create_user(session)
+        existing = Task(
+            user_id=user.id,
+            title="Submit passport renewal",
+            priority=30,
+        )
+        session.add(existing)
+        await session.commit()
+        await session.refresh(existing)
+
+        embeddings = FakeEmbeddingService(
+            {
+                "Submit passport renewal": [0.0, 1.0, 0.0],
+                "Handle travel document application": [0.0, 1.0, 0.0],
+            }
+        )
+        svc = TaskService(
+            session,
+            embedding_service=embeddings,
+            enable_embedding_dedup=True,
+            embedding_similarity_threshold=0.95,
+        )
+
+        task, created = await svc.save_task(
+            user.id,
+            "Handle travel document application",
+            priority=70,
+        )
+
+        assert created is False
+        assert task.id == existing.id
+        assert task.priority == 70
+        assert task.embedding == [0.0, 1.0, 0.0]
+        assert task.embedding_model == "fake-embedding-model"
+        assert task.embedding_updated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_embedding_dedup_uses_new_task_when_similarity_is_low(self, session):
+        user = await _create_user(session)
+        embeddings = FakeEmbeddingService(
+            {
+                "Call Sam about invoice": [1.0, 0.0, 0.0],
+                "Buy hiking boots": [0.0, 1.0, 0.0],
+            }
+        )
+        svc = TaskService(
+            session,
+            embedding_service=embeddings,
+            enable_embedding_dedup=True,
+            embedding_similarity_threshold=0.95,
+        )
+
+        task1, created1 = await svc.save_task(user.id, "Call Sam about invoice")
+        task2, created2 = await svc.save_task(user.id, "Buy hiking boots")
+
+        assert created1 is True
+        assert created2 is True
+        assert task2.id != task1.id
+
+    @pytest.mark.asyncio
+    async def test_embedding_failure_falls_back_without_blocking_task_save(
+        self, session
+    ):
+        user = await _create_user(session)
+        svc = TaskService(
+            session,
+            embedding_service=FakeEmbeddingService(fail=True),
+            enable_embedding_dedup=True,
+        )
+
+        task, created = await svc.save_task(user.id, "Plan next launch")
+
+        assert created is True
+        assert task.embedding is None
+        assert task.embedding_model is None
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +419,33 @@ class TestUpdateTask:
         result = await svc.update_task(user.id, "tax task", new_priority=90)
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_update_by_id_refreshes_embedding_for_new_title(self, session):
+        user = await _create_user(session)
+        embeddings = FakeEmbeddingService(
+            {
+                "Draft partner memo": [1.0, 0.0, 0.0],
+                "Draft client memo": [0.0, 1.0, 0.0],
+            }
+        )
+        svc = TaskService(
+            session,
+            embedding_service=embeddings,
+            enable_embedding_dedup=True,
+        )
+        task, _ = await svc.save_task(user.id, "Draft partner memo")
+
+        updated = await svc.update_task_by_id(
+            user.id,
+            task.id,
+            new_title="Draft client memo",
+        )
+
+        assert updated is not None
+        assert updated.embedding == [0.0, 1.0, 0.0]
+        assert updated.embedding_model == "fake-embedding-model"
+        assert updated.embedding_updated_at is not None
 
 
 # ---------------------------------------------------------------------------

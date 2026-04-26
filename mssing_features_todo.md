@@ -13,7 +13,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Reviewed frontend surface: `website`
 - [x] Reviewed test coverage under `tests`
 - [x] Used subagents for documentation/planning, agents/voice, backend services/API/tasks/models, and tests
-- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`, `.pm/research/80-calendar-gmail-full-tools-expansion.md`, `.pm/research/82-voice-full-tools-parity.md`, `.pm/research/83-dashboard-api-feature-closure.md`, `.pm/research/84-voice-reliability-feature-closure.md`, `.pm/research/88-pending-feature-closure-audit.md`
+- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`, `.pm/research/80-calendar-gmail-full-tools-expansion.md`, `.pm/research/82-voice-full-tools-parity.md`, `.pm/research/83-dashboard-api-feature-closure.md`, `.pm/research/84-voice-reliability-feature-closure.md`, `.pm/research/88-pending-feature-closure-audit.md`, `.pm/research/89-hybrid-embedding-task-deduplication.md`
 
 ## Implemented / Working Features
 
@@ -28,8 +28,8 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Onboarding service persists name, timezone, wake/sleep preferences, WhatsApp opt-in, and call windows.
 - [x] User preference hydration and write-through tools exist for onboarding and productivity context.
 - [x] Call-window model, service, validation, and ADK call-window tools exist.
-- [x] Task management exists: save task, fuzzy duplicate detection, complete task by title, list pending tasks, update, delete, snooze, unsnooze, and list completed tasks.
-- [x] Task model and pg_trgm migration exist.
+- [x] Task management exists: save task, fuzzy duplicate detection, optional Azure OpenAI semantic duplicate detection, complete task by title, list pending tasks, update, delete, snooze, unsnooze, and list completed tasks.
+- [x] Task model, pg_trgm migration, and embedding metadata migration exist.
 - [x] Core call/accountability system exists: `CallWindow`, `CallLog`, scheduling, dispatch, retries, Twilio status callbacks, AMD handling, and call management service.
 - [x] Celery call planner, catch-up scheduling, due-call dispatcher, trigger-call task, and stale-call sweeper exist.
 - [x] Twilio voice stream endpoint exists with stream token validation and call-context creation.
@@ -52,7 +52,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Gmail write support exists for composing new emails, archiving messages, and draft-reviewed reply send flows with duplicate-send prevention.
 - [x] Dashboard API exists for summary metrics, tasks, schedule, profile, progress history, and integrations.
 - [x] Website app exists under `website`, with dashboard, authenticated chat, login/onboarding entry, and integrations pages.
-- [x] Backend test suite is broad and currently passes with `825 passed, 1 skipped, 73 warnings`.
+- [x] Backend test suite is broad and currently passes with `832 passed, 1 skipped, 73 warnings`.
 
 ## Partial / Needs Verification
 
@@ -113,7 +113,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Add dashboard call history API path.
 - [x] Add dashboard settings editing API path.
 - [x] Add dashboard connection-management polish through authenticated connect/disconnect OAuth paths.
-- [x] Explicitly defer hybrid embedding-based task deduplication beyond pg_trgm/fuzzy matching until embedding provider, dimensions, threshold, cost, and privacy behavior are specified.
+- [x] Implement hybrid embedding-based task deduplication beyond pg_trgm/fuzzy matching with Azure OpenAI `text-embedding-3-large`, env-driven credentials, configurable threshold/backfill limits, JSONB task embeddings, and safe fallback when embeddings are unavailable.
 - [x] Add weekend mode as tone-only local-weekend voice guidance.
 - [x] Explicitly defer urgent-email proactive call behavior until escalation rules, opt-in, quiet hours, rate limits, and thread dedupe are specified.
 - [x] Explicitly defer auto-task creation from emails until extraction confidence, review policy, ignored senders, and message/thread tracking are specified.
@@ -124,7 +124,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 
 ## Test Coverage TODO
 
-- [x] Ran backend verification: `uv run pytest -q` passed with `825 passed, 1 skipped, 73 warnings`.
+- [x] Ran backend verification: `uv run pytest -q` passed with `832 passed, 1 skipped, 73 warnings`.
 - [x] Ran frontend verification: `npm run test`, `npm run lint`, and `npm run build` passed for the website app.
 - [x] Add ADK eval datasets for core scenarios: onboarding completion, task capture, task completion, calendar scheduling, Gmail reply, call management, and refusal/error handling.
 - [x] Add tests that assert task-tool registration and required ADK schemas for update/delete/snooze/unsnooze/list-pending parity.

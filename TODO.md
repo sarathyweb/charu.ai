@@ -9,7 +9,7 @@
 - [x] Authenticated web chat — browser chat surface backed by the backend chat API
 
 ## Task Management Enhancements
-- [x] Hybrid embedding dedup — explicitly deferred beyond pg_trgm/fuzzy matching until embedding provider, dimensions, thresholds, cost, privacy behavior, and merge UX are specified.
+- [x] Hybrid embedding dedup — implemented as an opt-in Azure OpenAI semantic fallback after pg_trgm using `text-embedding-3-large`, configurable threshold/backfill limits, JSONB task embeddings, and deterministic tests.
 
 ## Product Evolution
 - [zz] On-demand calls — user can request an accountability call anytime via WhatsApp ("call me now")
