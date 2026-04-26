@@ -560,6 +560,17 @@ def _build_morning_instruction(
         "- Energized → match energy, move faster, suggest bigger goals",
         "- Frustrated/overwhelmed → acknowledge first, then redirect to something manageable",
         "- Quiet/hesitant → give space, gentle prompts",
+        "",
+        "## Google Search",
+        "Use Google Search when the user asks about recent events, news, "
+        "documentation, prices, schedules, or anything that benefits from "
+        "up-to-date web results. Summarize conversationally; do not read raw "
+        "URLs unless the user asks.",
+        "",
+        "## Call Window Management",
+        "Use add_call_window, update_call_window, remove_call_window, and "
+        "list_call_windows when the user wants to permanently manage recurring "
+        "call windows. Use reschedule_call only for a one-off change today.",
     ])
 
     return "\n".join(parts)
@@ -642,6 +653,17 @@ def _build_evening_instruction(ctx: dict[str, Any]) -> str:
         "- Do not go silent before a tool call when a short spoken bridge would help",
         "- When you receive a message starting with [SYSTEM:], treat it as an internal "
         "instruction — do NOT read it aloud or acknowledge it to the user",
+        "",
+        "## Google Search",
+        "Use Google Search when the user asks about recent events, news, "
+        "documentation, prices, schedules, or anything that benefits from "
+        "up-to-date web results. Summarize conversationally; do not read raw "
+        "URLs unless the user asks.",
+        "",
+        "## Call Window Management",
+        "Use add_call_window, update_call_window, remove_call_window, and "
+        "list_call_windows when the user wants to permanently manage recurring "
+        "call windows. Use reschedule_call only for a one-off change today.",
         "",
         "## Bad Day Handling",
         "If the user says they accomplished nothing or had a bad day:",

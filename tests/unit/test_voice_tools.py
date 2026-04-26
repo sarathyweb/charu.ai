@@ -5,10 +5,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pipecat.adapters.schemas.tools_schema import AdapterType
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.goal import Goal
 from app.models.user import User
+from app.services.call_window_service import CallWindowService
 from app.services.task_service import TaskService
 from app.voice import tools as voice_tools
 
@@ -74,7 +76,9 @@ def _params() -> SimpleNamespace:
 def test_voice_tool_registration_includes_task_parity_tools():
     llm = _register()
 
-    assert {
+    assert set(llm.functions) == {
+        "save_call_outcome",
+        "save_evening_call_outcome",
         "save_task",
         "complete_task_by_title",
         "list_pending_tasks",
@@ -104,8 +108,28 @@ def test_voice_tool_registration_includes_task_parity_tools():
         "send_approved_reply",
         "compose_email",
         "archive_email",
-    }.issubset(llm.functions)
-    assert len(llm.functions) == 36
+        "schedule_callback",
+        "skip_call",
+        "reschedule_call",
+        "get_next_call",
+        "cancel_all_calls_today",
+        "add_call_window",
+        "update_call_window",
+        "remove_call_window",
+        "list_call_windows",
+    }
+    assert len(llm.functions) == 40
+
+
+def test_voice_google_search_is_registered_as_gemini_custom_tool():
+    llm = _FakeLLM()
+
+    tools = voice_tools.register_voice_tools(llm, call_log_id=7, user_id=42)
+
+    assert tools.custom_tools == {
+        AdapterType.GEMINI: [{"google_search": {}}],
+    }
+    assert "google_search" not in llm.functions
 
 
 def test_voice_mutating_tools_are_not_cancelled_on_interruption():
@@ -138,6 +162,9 @@ def test_voice_mutating_tools_are_not_cancelled_on_interruption():
         "skip_call",
         "reschedule_call",
         "cancel_all_calls_today",
+        "add_call_window",
+        "update_call_window",
+        "remove_call_window",
     }
 
     for name in non_cancellable:
@@ -154,6 +181,7 @@ def test_voice_mutating_tools_are_not_cancelled_on_interruption():
     )
     assert llm.registration_options["search_emails"]["cancel_on_interruption"] is True
     assert llm.registration_options["get_next_call"]["cancel_on_interruption"] is True
+    assert llm.registration_options["list_call_windows"]["cancel_on_interruption"] is True
 
 
 @pytest.mark.asyncio
@@ -396,6 +424,141 @@ async def test_voice_calendar_and_gmail_tools_return_callback_payloads(
         "success": True,
         "status": "archived",
         "message_id": "msg_1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_voice_call_window_tools_return_callback_payloads(session):
+    user = await _create_user(session)
+    llm = _register(user_id=user.id)
+
+    add_params = _params()
+    await llm.functions["add_call_window"](
+        add_params,
+        window_type="morning",
+        start_time="08:00",
+        end_time="08:30",
+    )
+    add_payload = add_params.result_callback.await_args.args[0]
+    assert add_payload == {
+        "success": True,
+        "status": "added",
+        "window_type": "morning",
+        "start": "08:00",
+        "end": "08:30",
+    }
+
+    list_params = _params()
+    await llm.functions["list_call_windows"](list_params)
+    list_payload = list_params.result_callback.await_args.args[0]
+    assert list_payload["success"] is True
+    assert list_payload["count"] == 1
+    assert list_payload["windows"][0] == {
+        "window_type": "morning",
+        "start": "08:00",
+        "end": "08:30",
+        "is_active": True,
+    }
+
+    update_params = _params()
+    await llm.functions["update_call_window"](
+        update_params,
+        window_type="morning",
+        start_time="08:15",
+        end_time="08:45",
+    )
+    update_payload = update_params.result_callback.await_args.args[0]
+    assert update_payload == {
+        "success": True,
+        "status": "updated",
+        "window_type": "morning",
+        "start": "08:15",
+        "end": "08:45",
+    }
+
+    remove_params = _params()
+    await llm.functions["remove_call_window"](remove_params, window_type="morning")
+    remove_payload = remove_params.result_callback.await_args.args[0]
+    assert remove_payload == {
+        "success": True,
+        "status": "removed",
+        "window_type": "morning",
+        "start": "08:15",
+        "end": "08:45",
+    }
+
+    svc = CallWindowService(session)
+    assert await svc.list_windows_for_user(user.id) == []
+
+
+@pytest.mark.asyncio
+async def test_voice_call_window_tools_return_validation_errors(session):
+    user = await _create_user(session)
+    llm = _register(user_id=user.id)
+
+    bad_type_params = _params()
+    await llm.functions["add_call_window"](
+        bad_type_params,
+        window_type="lunch",
+        start_time="12:00",
+        end_time="12:30",
+    )
+    bad_type_payload = bad_type_params.result_callback.await_args.args[0]
+    assert bad_type_payload["success"] is False
+    assert "window_type must be one of" in bad_type_payload["error"]
+
+    short_window_params = _params()
+    await llm.functions["add_call_window"](
+        short_window_params,
+        window_type="morning",
+        start_time="08:00",
+        end_time="08:10",
+    )
+    short_window_payload = short_window_params.result_callback.await_args.args[0]
+    assert short_window_payload == {
+        "success": False,
+        "error": "Call window must be at least 20 minutes wide.",
+    }
+
+    await llm.functions["add_call_window"](
+        _params(),
+        window_type="morning",
+        start_time="08:00",
+        end_time="08:30",
+    )
+
+    overlap_params = _params()
+    await llm.functions["add_call_window"](
+        overlap_params,
+        window_type="afternoon",
+        start_time="08:15",
+        end_time="08:45",
+    )
+    overlap_payload = overlap_params.result_callback.await_args.args[0]
+    assert overlap_payload["success"] is False
+    assert "overlaps with your morning window" in overlap_payload["error"]
+
+    no_fields_params = _params()
+    await llm.functions["update_call_window"](
+        no_fields_params,
+        window_type="morning",
+    )
+    no_fields_payload = no_fields_params.result_callback.await_args.args[0]
+    assert no_fields_payload == {
+        "success": False,
+        "error": "Provide at least one of start_time or end_time.",
+    }
+
+    missing_remove_params = _params()
+    await llm.functions["remove_call_window"](
+        missing_remove_params,
+        window_type="evening",
+    )
+    missing_remove_payload = missing_remove_params.result_callback.await_args.args[0]
+    assert missing_remove_payload == {
+        "success": True,
+        "status": "already_removed",
+        "window_type": "evening",
     }
 
 

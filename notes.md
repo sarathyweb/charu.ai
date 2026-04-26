@@ -166,6 +166,10 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: live model evals are valuable but should be backed by source-controlled contracts that fail deterministically when tool names, schemas, confirmation gates, voice safety flags, or core scenario coverage drift.
   Source: `.pm/research/81-deterministic-adk-voice-evals-and-backlog.md`
 
+- 2026-04-26: Voice Google Search is registered as a Gemini Live custom tool, while voice call-window CRUD is registered as direct Pipecat functions over `CallWindowService`.
+  Rationale: Google Search grounding is server-side in Gemini Live and has no local function callback, while recurring call-window mutations are application-owned state changes that need local validation, persistence, and rematerialization side effects.
+  Source: `.pm/research/82-voice-full-tools-parity.md`
+
 ## Tech Stack
 
 - Python 3.10+

@@ -6,6 +6,8 @@ import inspect
 import json
 from pathlib import Path
 
+from pipecat.adapters.schemas.tools_schema import AdapterType
+
 from app.services.anti_habituation import Approach
 from app.voice.context import build_system_instruction
 from app.voice.tools import register_voice_tools
@@ -50,6 +52,14 @@ EXPECTED_VOICE_TOOLS = {
     "reschedule_call",
     "get_next_call",
     "cancel_all_calls_today",
+    "add_call_window",
+    "update_call_window",
+    "remove_call_window",
+    "list_call_windows",
+}
+
+EXPECTED_CUSTOM_VOICE_TOOLS = {
+    "google_search",
 }
 
 
@@ -69,10 +79,10 @@ class _FakeTask:
         self.priority = priority
 
 
-def _register_voice() -> _FakeLLM:
+def _register_voice() -> tuple[_FakeLLM, object]:
     llm = _FakeLLM()
-    register_voice_tools(llm, call_log_id=1, user_id=2)
-    return llm
+    tools = register_voice_tools(llm, call_log_id=1, user_id=2)
+    return llm, tools
 
 
 def _voice_eval_data() -> dict:
@@ -121,17 +131,20 @@ def _evening_context() -> dict:
 
 
 def test_voice_tool_registration_matches_current_eval_contract():
-    llm = _register_voice()
+    llm, tools = _register_voice()
 
     assert set(llm.functions) == EXPECTED_VOICE_TOOLS
+    assert tools.custom_tools == {
+        AdapterType.GEMINI: [{"google_search": {}}],
+    }
 
 
 def test_voice_eval_cases_reference_registered_tools_and_function_args():
-    llm = _register_voice()
+    llm, tools = _register_voice()
     data = _voice_eval_data()
 
     assert data["schema_version"] == 1
-    assert len(data["cases"]) >= 8
+    assert len(data["cases"]) >= 10
 
     for case in data["cases"]:
         for tool_name in case["expected_tools"]:
@@ -140,9 +153,18 @@ def test_voice_eval_cases_reference_registered_tools_and_function_args():
             parameters.discard("params")
             assert set(case["required_args"][tool_name]) <= parameters
 
+        custom_tools = {
+            name
+            for custom_tool in tools.custom_tools.get(AdapterType.GEMINI, [])
+            for name in custom_tool
+        }
+        for tool_name in case.get("expected_custom_tools", []):
+            assert tool_name in EXPECTED_CUSTOM_VOICE_TOOLS
+            assert tool_name in custom_tools
+
 
 def test_voice_eval_non_cancellable_expectations_match_registration():
-    llm = _register_voice()
+    llm, _ = _register_voice()
     data = _voice_eval_data()
 
     for case in data["cases"]:
@@ -162,16 +184,17 @@ def test_voice_prompt_expectations_are_present_in_live_instructions():
         assert phrase in evening_instruction
 
 
-def test_known_voice_parity_gaps_stay_explicit_until_implemented():
-    llm = _register_voice()
+def test_known_voice_parity_gaps_are_empty_after_full_tools_parity():
+    llm, tools = _register_voice()
     data = _voice_eval_data()
     missing = set(data["known_missing_voice_parity_tools"])
 
-    assert missing == {
-        "google_search",
-        "add_call_window",
-        "update_call_window",
-        "remove_call_window",
-        "list_call_windows",
+    custom_tools = {
+        name
+        for custom_tool in tools.custom_tools.get(AdapterType.GEMINI, [])
+        for name in custom_tool
     }
-    assert missing.isdisjoint(llm.functions)
+    available = set(llm.functions) | custom_tools
+
+    assert missing == set()
+    assert EXPECTED_CUSTOM_VOICE_TOOLS <= available

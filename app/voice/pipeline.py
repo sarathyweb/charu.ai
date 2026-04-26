@@ -222,6 +222,8 @@ def _default_instruction(call_type: str) -> str:
             "Keep it brief and calming. "
             "Before calling a tool, first say one short sentence telling the user what you're doing. "
             "After a tool returns, immediately tell the user the result in plain language. "
+            "Use Google Search for current web-dependent questions. "
+            "Use call-window tools for permanent recurring call schedule changes. "
             "When you receive a message starting with [SYSTEM:], treat it "
             "as an internal instruction — do NOT read it aloud."
         )
@@ -233,6 +235,8 @@ def _default_instruction(call_type: str) -> str:
         "Keep responses short — 1-3 sentences. "
         "Before calling a tool, first say one short sentence telling the user what you're doing. "
         "After a tool returns, immediately tell the user the result in plain language. "
+        "Use Google Search for current web-dependent questions. "
+        "Use call-window tools for permanent recurring call schedule changes. "
         "When you receive a message starting with [SYSTEM:], treat it "
         "as an internal instruction — do NOT read it aloud."
     )

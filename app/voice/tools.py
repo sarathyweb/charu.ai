@@ -21,17 +21,20 @@ import logging
 from datetime import date, datetime
 from datetime import time as dt_time
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.services.llm_service import FunctionCallParams
 
 from app.db import async_session_factory
 from app.models.call_log import CallLog
 from app.models.user import User
 from app.services.call_management_service import CallManagementService
+from app.services.call_window_service import CallWindowService
 from app.services.goal_service import GoalService
 from app.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
+
+MAX_WINDOWS_PER_USER = 3
 
 
 def _task_payload(task, *, status: str) -> dict:
@@ -61,6 +64,17 @@ def _goal_payload(goal, *, status: str) -> dict:
     }
 
 
+def _call_window_payload(window, *, status: str) -> dict:
+    """Return the standard voice call-window success payload."""
+    return {
+        "success": True,
+        "status": status,
+        "window_type": window.window_type,
+        "start": window.start_time.strftime("%H:%M"),
+        "end": window.end_time.strftime("%H:%M"),
+    }
+
+
 def _parse_snooze_until(snooze_until: str) -> datetime:
     """Parse an ISO-8601 datetime, requiring timezone information."""
     parsed = datetime.fromisoformat(snooze_until.replace("Z", "+00:00"))
@@ -87,6 +101,46 @@ def _parse_calendar_date(value: str, field_name: str) -> date:
         raise ValueError(f"{field_name} must be in YYYY-MM-DD format.") from exc
 
 
+def _parse_call_window_time(value: str, field_name: str) -> dt_time:
+    """Parse a required HH:MM call-window time string."""
+    try:
+        return dt_time.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be in HH:MM format.") from exc
+
+
+def _windows_overlap(
+    a_start: dt_time,
+    a_end: dt_time,
+    b_start: dt_time,
+    b_end: dt_time,
+) -> bool:
+    """Return True when two same-day call windows overlap."""
+    a_s = a_start.hour * 60 + a_start.minute
+    a_e = a_end.hour * 60 + a_end.minute
+    b_s = b_start.hour * 60 + b_start.minute
+    b_e = b_end.hour * 60 + b_end.minute
+    return a_s < b_e and b_s < a_e
+
+
+def _validate_call_window_shape(start: dt_time, end: dt_time) -> None:
+    """Validate basic same-day call-window shape constraints."""
+    start_minutes = start.hour * 60 + start.minute
+    end_minutes = end.hour * 60 + end.minute
+    if end_minutes <= start_minutes:
+        raise ValueError("End time must be after start time.")
+    if (end_minutes - start_minutes) < 20:
+        raise ValueError("Call window must be at least 20 minutes wide.")
+
+
+def _validate_call_window_type(window_type: str) -> None:
+    """Validate the recurring call-window type."""
+    valid_types = {"morning", "afternoon", "evening"}
+    if window_type not in valid_types:
+        allowed = ", ".join(sorted(valid_types))
+        raise ValueError(f"window_type must be one of: {allowed}.")
+
+
 async def _get_google_user(session, user_id: int, service_name: str):
     """Load a user and verify the requested Google integration is connected."""
     user = await session.get(User, user_id)
@@ -102,6 +156,31 @@ async def _get_google_user(session, user_id: int, service_name: str):
         }
 
     return user, None
+
+
+async def _rematerialize_call_window_if_ready(session, user: User, window_type: str):
+    """Best-effort future schedule refresh after a recurring window change."""
+    if not user.onboarding_complete:
+        return
+
+    try:
+        from app.agents.productivity_agent.onboarding_tools import (
+            _rematerialize_future_calls,
+        )
+
+        await _rematerialize_future_calls(
+            session,
+            user,
+            window_type_filter=window_type,
+        )
+        await session.commit()
+    except Exception:
+        logger.exception(
+            "Rematerialization failed for user_id=%d type=%s; catch-up sweep "
+            "will backfill",
+            user.id,
+            window_type,
+        )
 
 
 def register_voice_tools(
@@ -1564,6 +1643,342 @@ def register_voice_tools(
                 {"success": False, "error": "Failed to cancel calls"}
             )
 
+    # -- Call window management tools --------------------------------
+
+    async def add_call_window(
+        params: FunctionCallParams,
+        window_type: str,
+        start_time: str,
+        end_time: str,
+    ):
+        """Add or replace a recurring call window.
+
+        Invocation Condition: Call when the user wants to add a recurring
+        morning, afternoon, or evening call window. This is a permanent
+        schedule change, not a one-off reschedule for today.
+
+        Args:
+            window_type: One of morning, afternoon, or evening.
+            start_time: Window start in HH:MM format, user's local time.
+            end_time: Window end in HH:MM format, user's local time.
+        """
+        try:
+            _validate_call_window_type(window_type)
+            start = _parse_call_window_time(start_time, "start_time")
+            end = _parse_call_window_time(end_time, "end_time")
+            _validate_call_window_shape(start, end)
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+            return
+
+        try:
+            async with async_session_factory() as session:
+                user = await session.get(User, user_id)
+                if user is None:
+                    await params.result_callback(
+                        {"success": False, "error": "User not found."}
+                    )
+                    return
+                if not user.timezone:
+                    await params.result_callback(
+                        {
+                            "success": False,
+                            "error": "Please set your timezone first.",
+                        }
+                    )
+                    return
+
+                svc = CallWindowService(session)
+                existing = await svc.list_windows_for_user(user_id)
+                existing_same_type = [
+                    window for window in existing if window.window_type == window_type
+                ]
+                is_new = not existing_same_type
+
+                if is_new and len(existing) >= MAX_WINDOWS_PER_USER:
+                    await params.result_callback(
+                        {
+                            "success": False,
+                            "error": (
+                                f"You already have {len(existing)} call windows "
+                                f"(maximum is {MAX_WINDOWS_PER_USER}). Remove one "
+                                "before adding another."
+                            ),
+                        }
+                    )
+                    return
+
+                for window in existing:
+                    if window.window_type == window_type:
+                        continue
+                    if _windows_overlap(
+                        start,
+                        end,
+                        window.start_time,
+                        window.end_time,
+                    ):
+                        await params.result_callback(
+                            {
+                                "success": False,
+                                "error": (
+                                    f"This window overlaps with your "
+                                    f"{window.window_type} window "
+                                    f"({window.start_time.strftime('%H:%M')}-"
+                                    f"{window.end_time.strftime('%H:%M')})."
+                                ),
+                            }
+                        )
+                        return
+
+                window = await svc.save_call_window(
+                    user_id=user_id,
+                    window_type=window_type,
+                    start_time=start,
+                    end_time=end,
+                )
+                await _rematerialize_call_window_if_ready(
+                    session,
+                    user,
+                    window_type,
+                )
+
+            status = "added" if is_new else "updated"
+            logger.info(
+                "add_call_window: user_id=%d type=%s status=%s",
+                user_id,
+                window_type,
+                status,
+            )
+            await params.result_callback(_call_window_payload(window, status=status))
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("add_call_window failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to add call window"}
+            )
+
+    async def update_call_window(
+        params: FunctionCallParams,
+        window_type: str,
+        start_time: str = "",
+        end_time: str = "",
+    ):
+        """Update an existing recurring call window.
+
+        Invocation Condition: Call when the user wants to permanently change
+        a recurring morning, afternoon, or evening call window. Use
+        reschedule_call instead for one-off changes today.
+
+        Args:
+            window_type: One of morning, afternoon, or evening.
+            start_time: Optional new start in HH:MM format, user's local time.
+            end_time: Optional new end in HH:MM format, user's local time.
+        """
+        try:
+            _validate_call_window_type(window_type)
+            if not start_time and not end_time:
+                raise ValueError("Provide at least one of start_time or end_time.")
+            parsed_start = (
+                _parse_call_window_time(start_time, "start_time")
+                if start_time
+                else None
+            )
+            parsed_end = (
+                _parse_call_window_time(end_time, "end_time") if end_time else None
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+            return
+
+        try:
+            async with async_session_factory() as session:
+                user = await session.get(User, user_id)
+                if user is None:
+                    await params.result_callback(
+                        {"success": False, "error": "User not found."}
+                    )
+                    return
+
+                svc = CallWindowService(session)
+                existing = await svc.list_windows_for_user(user_id)
+                target = next(
+                    (
+                        window
+                        for window in existing
+                        if window.window_type == window_type
+                    ),
+                    None,
+                )
+                if target is None:
+                    await params.result_callback(
+                        {
+                            "success": False,
+                            "error": f"No active {window_type} call window found.",
+                        }
+                    )
+                    return
+
+                effective_start = parsed_start or target.start_time
+                effective_end = parsed_end or target.end_time
+                _validate_call_window_shape(effective_start, effective_end)
+
+                for window in existing:
+                    if window.window_type == window_type:
+                        continue
+                    if _windows_overlap(
+                        effective_start,
+                        effective_end,
+                        window.start_time,
+                        window.end_time,
+                    ):
+                        await params.result_callback(
+                            {
+                                "success": False,
+                                "error": (
+                                    f"This window would overlap with your "
+                                    f"{window.window_type} window "
+                                    f"({window.start_time.strftime('%H:%M')}-"
+                                    f"{window.end_time.strftime('%H:%M')})."
+                                ),
+                            }
+                        )
+                        return
+
+                window = await svc.update_window(
+                    window_id=target.id,
+                    start_time=parsed_start,
+                    end_time=parsed_end,
+                )
+                await _rematerialize_call_window_if_ready(
+                    session,
+                    user,
+                    window_type,
+                )
+
+            logger.info(
+                "update_call_window: user_id=%d type=%s",
+                user_id,
+                window_type,
+            )
+            await params.result_callback(
+                _call_window_payload(window, status="updated")
+            )
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("update_call_window failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to update call window"}
+            )
+
+    async def remove_call_window(
+        params: FunctionCallParams,
+        window_type: str,
+    ):
+        """Remove a recurring call window.
+
+        Invocation Condition: Call when the user wants to permanently remove
+        a recurring morning, afternoon, or evening call window.
+
+        Args:
+            window_type: One of morning, afternoon, or evening.
+        """
+        try:
+            _validate_call_window_type(window_type)
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+            return
+
+        try:
+            async with async_session_factory() as session:
+                user = await session.get(User, user_id)
+                if user is None:
+                    await params.result_callback(
+                        {"success": False, "error": "User not found."}
+                    )
+                    return
+
+                svc = CallWindowService(session)
+                existing = await svc.list_windows_for_user(user_id)
+                target = next(
+                    (
+                        window
+                        for window in existing
+                        if window.window_type == window_type
+                    ),
+                    None,
+                )
+                if target is None:
+                    await params.result_callback(
+                        {
+                            "success": True,
+                            "status": "already_removed",
+                            "window_type": window_type,
+                        }
+                    )
+                    return
+
+                window = await svc.deactivate_window(target.id)
+                await _rematerialize_call_window_if_ready(
+                    session,
+                    user,
+                    window_type,
+                )
+
+            logger.info(
+                "remove_call_window: user_id=%d type=%s",
+                user_id,
+                window_type,
+            )
+            await params.result_callback(_call_window_payload(window, status="removed"))
+        except ValueError as exc:
+            await params.result_callback({"success": False, "error": str(exc)})
+        except Exception:
+            logger.exception("remove_call_window failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to remove call window"}
+            )
+
+    async def list_call_windows(params: FunctionCallParams):
+        """List the user's active recurring call windows.
+
+        Invocation Condition: Call when the user asks what recurring calls are
+        scheduled or wants to review their current call windows.
+        """
+        try:
+            async with async_session_factory() as session:
+                user = await session.get(User, user_id)
+                if user is None:
+                    await params.result_callback(
+                        {"success": False, "error": "User not found."}
+                    )
+                    return
+
+                svc = CallWindowService(session)
+                windows = await svc.list_windows_for_user(user_id)
+
+            await params.result_callback(
+                {
+                    "success": True,
+                    "windows": [
+                        {
+                            "window_type": window.window_type,
+                            "start": window.start_time.strftime("%H:%M"),
+                            "end": window.end_time.strftime("%H:%M"),
+                            "is_active": window.is_active,
+                        }
+                        for window in windows
+                    ],
+                    "count": len(windows),
+                }
+            )
+        except Exception:
+            logger.exception("list_call_windows failed for user_id=%d", user_id)
+            await params.result_callback(
+                {"success": False, "error": "Failed to list call windows"}
+            )
+
     # ── Build ToolsSchema and register handlers ──────────────────────
 
     all_tools = [
@@ -1603,9 +2018,16 @@ def register_voice_tools(
         reschedule_call,
         get_next_call,
         cancel_all_calls_today,
+        add_call_window,
+        update_call_window,
+        remove_call_window,
+        list_call_windows,
     ]
 
-    tools = ToolsSchema(standard_tools=all_tools)
+    tools = ToolsSchema(
+        standard_tools=all_tools,
+        custom_tools={AdapterType.GEMINI: [{"google_search": {}}]},
+    )
 
     # Register each direct function on the LLM service
     non_cancellable_tools = {
@@ -1635,6 +2057,9 @@ def register_voice_tools(
         "skip_call",
         "reschedule_call",
         "cancel_all_calls_today",
+        "add_call_window",
+        "update_call_window",
+        "remove_call_window",
     }
     for fn in all_tools:
         llm.register_direct_function(

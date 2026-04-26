@@ -85,6 +85,26 @@
       "non_cancellable_tools": ["schedule_callback"]
     },
     {
+      "id": "voice_call_window_management",
+      "scenario": "call_window_management",
+      "utterance": "Move my recurring morning calls to 8:15 to 8:45 and show me my call windows.",
+      "expected_tools": ["update_call_window", "list_call_windows"],
+      "required_args": {
+        "update_call_window": ["window_type"],
+        "list_call_windows": []
+      },
+      "non_cancellable_tools": ["update_call_window"]
+    },
+    {
+      "id": "voice_web_search",
+      "scenario": "web_search",
+      "utterance": "What's the latest Gemini Live documentation say about search grounding?",
+      "expected_tools": [],
+      "expected_custom_tools": ["google_search"],
+      "required_args": {},
+      "non_cancellable_tools": []
+    },
+    {
       "id": "voice_refusal_send_without_approval",
       "scenario": "refusal_error_handling",
       "utterance": "Send that email, maybe if it looks okay.",
@@ -97,19 +117,17 @@
     "morning": [
       "You MUST call save_call_outcome before ending the call",
       "Before calling a tool",
-      "After a tool returns"
+      "After a tool returns",
+      "Google Search",
+      "Call Window Management"
     ],
     "evening": [
       "You MUST call save_evening_call_outcome before ending the call",
       "Before calling a tool",
-      "After a tool returns"
+      "After a tool returns",
+      "Google Search",
+      "Call Window Management"
     ]
   },
-  "known_missing_voice_parity_tools": [
-    "google_search",
-    "add_call_window",
-    "update_call_window",
-    "remove_call_window",
-    "list_call_windows"
-  ]
+  "known_missing_voice_parity_tools": []
 }
