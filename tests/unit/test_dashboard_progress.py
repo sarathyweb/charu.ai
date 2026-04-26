@@ -8,17 +8,48 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import app.api.dashboard as dashboard
-from app.api.dashboard import connect_integration, get_progress
+from app.api.dashboard import (
+    CallWindowRequest,
+    CallWindowUpdateRequest,
+    GoalCreateRequest,
+    GoalUpdateRequest,
+    TaskSnoozeRequest,
+    TaskUpdateRequest,
+    UserProfileUpdateRequest,
+    abandon_goal,
+    complete_goal,
+    complete_task,
+    connect_integration,
+    create_call_window,
+    create_goal,
+    delete_call_window,
+    delete_goal,
+    delete_task,
+    get_call_history,
+    get_goals,
+    get_progress,
+    get_tasks,
+    snooze_task,
+    unsnooze_task,
+    update_call_window,
+    update_goal,
+    update_task,
+    update_user_profile,
+)
 from app.models.call_log import CallLog
 from app.models.call_window import CallWindow
 from app.models.enums import (
     CallLogStatus,
     CallType,
+    GoalStatus,
     OccurrenceKind,
     OutcomeConfidence,
 )
 from app.models.schemas import FirebasePrincipal
 from app.models.user import User
+from app.services.call_window_service import CallWindowService
+from app.services.goal_service import GoalService
+from app.services.task_service import TaskService
 from app.services.user_service import UserService
 
 
@@ -210,3 +241,202 @@ async def test_connect_integration_can_return_authenticated_oauth_url(monkeypatc
     assert result == {
         "url": "https://api.example.test/auth/google/start?token=ephemeral-token"
     }
+
+
+@pytest.mark.asyncio
+async def test_dashboard_task_mutation_routes(session):
+    user = await _create_user(session)
+    principal = FirebasePrincipal(uid=user.firebase_uid or "uid", phone_number=user.phone)
+    user_service = UserService(session)
+    task_service = TaskService(session)
+
+    task, _ = await task_service.save_task(
+        user_id=user.id,
+        title="File taxes",
+        priority=50,
+    )
+
+    updated = await update_task(
+        task.id,
+        TaskUpdateRequest(title="File quarterly taxes", priority=90),
+        principal=principal,
+        user_service=user_service,
+        task_service=task_service,
+    )
+    assert updated["task"]["title"] == "File quarterly taxes"
+    assert updated["task"]["priority"] == 90
+
+    snooze_until = datetime.now(timezone.utc) + timedelta(days=1)
+    snoozed = await snooze_task(
+        task.id,
+        TaskSnoozeRequest(snooze_until=snooze_until),
+        principal=principal,
+        user_service=user_service,
+        task_service=task_service,
+    )
+    assert snoozed["task"]["status"] == "snoozed"
+
+    snoozed_list = await get_tasks(
+        status="snoozed",
+        principal=principal,
+        user_service=user_service,
+        task_service=task_service,
+    )
+    assert snoozed_list["tasks"][0]["id"] == task.id
+
+    unsnoozed = await unsnooze_task(
+        task.id,
+        principal=principal,
+        user_service=user_service,
+        task_service=task_service,
+    )
+    assert unsnoozed["task"]["status"] == "pending"
+
+    completed = await complete_task(
+        task.id,
+        principal=principal,
+        user_service=user_service,
+        task_service=task_service,
+    )
+    assert completed["task"]["status"] == "completed"
+
+    deleted = await delete_task(
+        task.id,
+        principal=principal,
+        user_service=user_service,
+        task_service=task_service,
+    )
+    assert deleted["status"] == "deleted"
+    assert deleted["task"]["id"] == task.id
+
+
+@pytest.mark.asyncio
+async def test_dashboard_goal_routes(session):
+    user = await _create_user(session)
+    principal = FirebasePrincipal(uid=user.firebase_uid or "uid", phone_number=user.phone)
+    user_service = UserService(session)
+    goal_service = GoalService(session)
+
+    created = await create_goal(
+        GoalCreateRequest(
+            title="Prepare launch",
+            description="Finish the launch checklist",
+            target_date=date(2026, 5, 1),
+        ),
+        principal=principal,
+        user_service=user_service,
+        goal_service=goal_service,
+    )
+    goal_id = created["goal"]["id"]
+    assert created["goal"]["title"] == "Prepare launch"
+
+    listed = await get_goals(
+        status=GoalStatus.ACTIVE.value,
+        principal=principal,
+        user_service=user_service,
+        goal_service=goal_service,
+    )
+    assert [goal["id"] for goal in listed["goals"]] == [goal_id]
+
+    updated = await update_goal(
+        goal_id,
+        GoalUpdateRequest(title="Prepare beta launch"),
+        principal=principal,
+        user_service=user_service,
+        goal_service=goal_service,
+    )
+    assert updated["goal"]["title"] == "Prepare beta launch"
+
+    completed = await complete_goal(
+        goal_id,
+        principal=principal,
+        user_service=user_service,
+        goal_service=goal_service,
+    )
+    assert completed["goal"]["status"] == GoalStatus.COMPLETED.value
+
+    abandoned = await abandon_goal(
+        goal_id,
+        principal=principal,
+        user_service=user_service,
+        goal_service=goal_service,
+    )
+    assert abandoned["goal"]["status"] == GoalStatus.ABANDONED.value
+
+    deleted = await delete_goal(
+        goal_id,
+        principal=principal,
+        user_service=user_service,
+        goal_service=goal_service,
+    )
+    assert deleted["status"] == "deleted"
+    assert deleted["goal"]["id"] == goal_id
+
+
+@pytest.mark.asyncio
+async def test_dashboard_profile_call_window_and_call_history_routes(session):
+    user = await _create_user(session)
+    principal = FirebasePrincipal(uid=user.firebase_uid or "uid", phone_number=user.phone)
+    user_service = UserService(session)
+    cw_service = CallWindowService(session)
+
+    profile = await update_user_profile(
+        UserProfileUpdateRequest(name="Asha", timezone="America/New_York"),
+        principal=principal,
+        user_service=user_service,
+    )
+    assert profile["name"] == "Asha"
+    assert profile["timezone"] == "America/New_York"
+
+    created_window = await create_call_window(
+        CallWindowRequest(
+            window_type="morning",
+            start_time="08:00",
+            end_time="08:30",
+        ),
+        principal=principal,
+        user_service=user_service,
+        cw_service=cw_service,
+        session=session,
+    )
+    assert created_window["window"]["type"] == "morning"
+
+    updated_window = await update_call_window(
+        "morning",
+        CallWindowUpdateRequest(start_time="08:15", end_time="08:45"),
+        principal=principal,
+        user_service=user_service,
+        cw_service=cw_service,
+        session=session,
+    )
+    assert updated_window["window"]["start_time"] == "08:15"
+
+    call_date = datetime.now(timezone.utc).date()
+    await _add_completed_call(
+        session,
+        user.id,
+        call_date,
+        CallType.MORNING.value,
+        confidence=OutcomeConfidence.CLEAR.value,
+    )
+    await session.commit()
+
+    history = await get_call_history(
+        status=CallLogStatus.COMPLETED.value,
+        call_type=CallType.MORNING.value,
+        limit=5,
+        principal=principal,
+        user_service=user_service,
+        session=session,
+    )
+    assert history["count"] == 1
+    assert history["calls"][0]["call_type"] == CallType.MORNING.value
+
+    removed = await delete_call_window(
+        "morning",
+        principal=principal,
+        user_service=user_service,
+        cw_service=cw_service,
+        session=session,
+    )
+    assert removed["status"] == "removed"

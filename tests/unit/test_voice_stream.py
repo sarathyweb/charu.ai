@@ -309,6 +309,52 @@ class TestVoiceStreamTransitionLogic:
 
         assert result is None
 
+
+class TestVoiceStreamContextLoading:
+    """Test cached-context loading for voice streams."""
+
+    @pytest.mark.asyncio
+    async def test_load_system_instruction_uses_cache(self):
+        from app.api.voice import _load_system_instruction_for_call
+
+        with (
+            patch(
+                "app.api.voice.get_cached_call_context",
+                AsyncMock(return_value=("cached instruction", {"opener": {"id": "x"}})),
+            ) as cached,
+            patch("app.voice.context.prepare_call_context", new_callable=AsyncMock) as prepare,
+        ):
+            result = await _load_system_instruction_for_call(1, 42, "morning")
+
+        assert result == ("cached instruction", {"opener": {"id": "x"}})
+        cached.assert_awaited_once_with(1)
+        prepare.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_load_system_instruction_falls_back_to_live_context(self):
+        from app.api.voice import _load_system_instruction_for_call
+
+        mock_session = AsyncMock()
+        with (
+            patch("app.api.voice.get_cached_call_context", AsyncMock(return_value=None)),
+            patch("app.api.voice.async_session_factory") as mock_factory,
+            patch(
+                "app.voice.context.prepare_call_context",
+                AsyncMock(return_value=("live instruction", {"approach": "task_led"})),
+            ) as prepare,
+        ):
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            result = await _load_system_instruction_for_call(1, 42, "morning")
+
+        assert result == ("live instruction", {"approach": "task_led"})
+        prepare.assert_awaited_once_with(
+            user_id=42,
+            call_type="morning",
+            session=mock_session,
+        )
+
     @pytest.mark.asyncio
     async def test_transition_completed_returns_none(self):
         """CallLog in terminal state 'completed' returns None."""

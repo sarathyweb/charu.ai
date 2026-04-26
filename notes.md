@@ -170,6 +170,14 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: Google Search grounding is server-side in Gemini Live and has no local function callback, while recurring call-window mutations are application-owned state changes that need local validation, persistence, and rematerialization side effects.
   Source: `.pm/research/82-voice-full-tools-parity.md`
 
+- 2026-04-26: Voice context is warmed through Redis/Celery, but the cache stores only JSON-safe system instructions and post-call cleanup state.
+  Rationale: ORM rows in pre-call context are not portable cache values. The live call needs fast startup, while cleanup only needs anti-habituation fields, so the cache boundary should stay small and deterministic.
+  Source: `.pm/research/84-voice-reliability-feature-closure.md`
+
+- 2026-04-26: Browser voice is explicitly de-scoped at `/ws/live/{session_id}` until a browser audio protocol is specified; Twilio voice remains the production voice path.
+  Rationale: Twilio Media Streams and browser microphone streaming have different auth, codec, and playback requirements. A machine-readable unsupported WebSocket response is safer than a missing route or an overclaimed implementation.
+  Source: `.pm/research/84-voice-reliability-feature-closure.md`
+
 ## Tech Stack
 
 - Python 3.10+

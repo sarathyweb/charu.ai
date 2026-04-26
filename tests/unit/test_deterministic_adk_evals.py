@@ -168,6 +168,10 @@ def test_deferred_product_backlog_review_is_complete_and_actionable():
 
     assert set(items) == DEFERRED_BACKLOG_ITEMS
     for item in items.values():
-        assert item["status"] in {"deferred_needs_spec", "deferred_integration"}
+        assert item["status"] in {
+            "deferred_needs_spec",
+            "deferred_integration",
+            "implemented_tone_only",
+        }
         assert item["decision"]
         assert item["next_step"]

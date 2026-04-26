@@ -589,6 +589,20 @@ async def _run_trigger_call(call_log_id: int) -> dict[str, str]:
 
         user_phone = user.phone
 
+    # Last-chance warm so the WebSocket pickup path can hit Redis instead
+    # of assembling all context after the user answers.
+    try:
+        from app.tasks.prefetch import _run_prefetch_call_context
+
+        await _run_prefetch_call_context(call_log_id)
+    except Exception:
+        logger.warning(
+            "trigger_call_task: context prefetch failed for CallLog %d; "
+            "voice pickup will fall back to live context assembly",
+            call_log_id,
+            exc_info=True,
+        )
+
     # ------------------------------------------------------------------
     # Step 2: Build TwiML with <Connect><Stream>
     # ------------------------------------------------------------------

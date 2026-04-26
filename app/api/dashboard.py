@@ -12,11 +12,12 @@ DELETE /api/integrations/{service}/disconnect — revoke OAuth for a service
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -25,16 +26,20 @@ from app.config import get_settings
 from app.dependencies import (
     get_call_window_service,
     get_db_session,
+    get_goal_service,
     get_task_service,
     get_user_service,
 )
 from app.models.call_log import CallLog
 from app.models.call_window import CallWindow
-from app.models.enums import CallLogStatus, CallType, OutcomeConfidence
+from app.models.enums import CallLogStatus, CallType, GoalStatus, OutcomeConfidence
+from app.models.goal import Goal
 from app.models.schemas import FirebasePrincipal
+from app.models.task import Task
 from app.models.user import User
 from app.services.call_window_service import CallWindowService
 from app.services.ephemeral_token_service import create_ephemeral_token
+from app.services.goal_service import GoalService
 from app.services.task_service import TaskService
 from app.services.user_service import UserService
 
@@ -63,6 +68,43 @@ GOAL_SUCCESS_CONFIDENCES = (
 )
 
 
+class TaskUpdateRequest(BaseModel):
+    title: str | None = None
+    priority: int | None = None
+
+
+class TaskSnoozeRequest(BaseModel):
+    snooze_until: datetime
+
+
+class GoalCreateRequest(BaseModel):
+    title: str
+    description: str | None = None
+    target_date: date | None = None
+
+
+class GoalUpdateRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    target_date: date | None = None
+
+
+class UserProfileUpdateRequest(BaseModel):
+    name: str | None = None
+    timezone: str | None = None
+
+
+class CallWindowRequest(BaseModel):
+    window_type: str
+    start_time: str
+    end_time: str
+
+
+class CallWindowUpdateRequest(BaseModel):
+    start_time: str | None = None
+    end_time: str | None = None
+
+
 async def _resolve_user(
     principal: FirebasePrincipal,
     user_service: UserService,
@@ -72,6 +114,110 @@ async def _resolve_user(
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+def _serialize_task(task: Task) -> dict:
+    """Serialize a task for dashboard responses."""
+    return {
+        "id": task.id,
+        "title": task.title,
+        "priority": task.priority,
+        "status": task.status,
+        "source": task.source,
+        "snoozed_until": task.snoozed_until.isoformat()
+        if task.snoozed_until
+        else None,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+    }
+
+
+def _serialize_goal(goal: Goal) -> dict:
+    """Serialize a goal for dashboard responses."""
+    return {
+        "id": goal.id,
+        "title": goal.title,
+        "description": goal.description,
+        "status": goal.status,
+        "target_date": goal.target_date.isoformat() if goal.target_date else None,
+        "completed_at": goal.completed_at.isoformat() if goal.completed_at else None,
+        "created_at": goal.created_at.isoformat() if goal.created_at else None,
+    }
+
+
+def _serialize_call(call: CallLog) -> dict:
+    """Serialize a call log for dashboard history responses."""
+    return {
+        "id": call.id,
+        "call_type": call.call_type,
+        "call_date": call.call_date.isoformat(),
+        "scheduled_time": call.scheduled_time.isoformat(),
+        "actual_start_time": call.actual_start_time.isoformat()
+        if call.actual_start_time
+        else None,
+        "end_time": call.end_time.isoformat() if call.end_time else None,
+        "status": call.status,
+        "occurrence_kind": call.occurrence_kind,
+        "attempt_number": call.attempt_number,
+        "duration_seconds": call.duration_seconds,
+        "goal": call.goal,
+        "next_action": call.next_action,
+        "commitments": call.commitments,
+        "call_outcome_confidence": call.call_outcome_confidence,
+        "accomplishments": call.accomplishments,
+        "tomorrow_intention": call.tomorrow_intention,
+        "reflection_confidence": call.reflection_confidence,
+        "recap_sent_at": call.recap_sent_at.isoformat()
+        if call.recap_sent_at
+        else None,
+    }
+
+
+def _parse_hhmm(value: str, field_name: str) -> time:
+    """Parse an HH:MM time string for dashboard call-window edits."""
+    try:
+        return time.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} must be in HH:MM format.",
+        ) from exc
+
+
+def _validate_dashboard_window_type(window_type: str) -> None:
+    """Validate a recurring call-window type."""
+    valid_types = {CallType.MORNING.value, CallType.AFTERNOON.value, CallType.EVENING.value}
+    if window_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail="window_type must be one of: afternoon, evening, morning.",
+        )
+
+
+async def _rematerialize_call_window(
+    session: AsyncSession,
+    user: User,
+    window_type: str,
+) -> None:
+    """Best-effort rematerialization after dashboard call-window edits."""
+    if not user.onboarding_complete:
+        return
+
+    try:
+        from app.services.call_materialization_service import rematerialize_future_calls
+
+        await rematerialize_future_calls(
+            session,
+            user,
+            window_type_filter=window_type,
+        )
+        await session.commit()
+    except Exception:
+        logger.exception(
+            "Dashboard call-window rematerialization failed for user_id=%s type=%s",
+            user.id,
+            window_type,
+        )
 
 
 def _today_for_user(user: User) -> date:
@@ -314,7 +460,7 @@ async def get_progress(
 
 @router.get("/api/tasks")
 async def get_tasks(
-    status: str = Query("pending", pattern="^(pending|completed)$"),
+    status: str = Query("pending", pattern="^(pending|completed|snoozed)$"),
     principal: FirebasePrincipal = Depends(get_firebase_user),
     user_service: UserService = Depends(get_user_service),
     task_service: TaskService = Depends(get_task_service),
@@ -324,23 +470,106 @@ async def get_tasks(
 
     if status == "pending":
         tasks = await task_service.list_pending_tasks(user.id, limit=50)
-    else:
+    elif status == "completed":
         tasks = await task_service.list_completed_tasks(user.id, limit=50)
+    else:
+        tasks = await task_service.list_snoozed_tasks(user.id, limit=50)
 
     return {
-        "tasks": [
-            {
-                "id": t.id,
-                "title": t.title,
-                "priority": t.priority,
-                "status": t.status,
-                "source": t.source,
-                "created_at": t.created_at.isoformat() if t.created_at else None,
-                "completed_at": t.completed_at.isoformat() if t.completed_at else None,
-            }
-            for t in tasks
-        ]
+        "tasks": [_serialize_task(t) for t in tasks]
     }
+
+
+@router.patch("/api/tasks/{task_id}")
+async def update_task(
+    task_id: int,
+    request: TaskUpdateRequest,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    task_service: TaskService = Depends(get_task_service),
+):
+    """Update a dashboard task's title and/or priority by ID."""
+    user = await _resolve_user(principal, user_service)
+    try:
+        task = await task_service.update_task_by_id(
+            user_id=user.id,
+            task_id=task_id,
+            new_title=request.title,
+            new_priority=request.priority,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task": _serialize_task(task)}
+
+
+@router.post("/api/tasks/{task_id}/complete")
+async def complete_task(
+    task_id: int,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    task_service: TaskService = Depends(get_task_service),
+):
+    """Mark a dashboard task completed by ID."""
+    user = await _resolve_user(principal, user_service)
+    task = await task_service.complete_task_by_id(user_id=user.id, task_id=task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task": _serialize_task(task)}
+
+
+@router.post("/api/tasks/{task_id}/snooze")
+async def snooze_task(
+    task_id: int,
+    request: TaskSnoozeRequest,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    task_service: TaskService = Depends(get_task_service),
+):
+    """Snooze a dashboard task by ID."""
+    user = await _resolve_user(principal, user_service)
+    try:
+        task = await task_service.snooze_task_by_id(
+            user_id=user.id,
+            task_id=task_id,
+            snooze_until=request.snooze_until,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task": _serialize_task(task)}
+
+
+@router.post("/api/tasks/{task_id}/unsnooze")
+async def unsnooze_task(
+    task_id: int,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    task_service: TaskService = Depends(get_task_service),
+):
+    """Reactivate a snoozed dashboard task by ID."""
+    user = await _resolve_user(principal, user_service)
+    task = await task_service.unsnooze_task_by_id(user_id=user.id, task_id=task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task": _serialize_task(task)}
+
+
+@router.delete("/api/tasks/{task_id}")
+async def delete_task(
+    task_id: int,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    task_service: TaskService = Depends(get_task_service),
+):
+    """Permanently delete a dashboard task by ID."""
+    user = await _resolve_user(principal, user_service)
+    task = await task_service.delete_task_by_id(user_id=user.id, task_id=task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task": _serialize_task(task), "status": "deleted"}
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +603,156 @@ async def get_call_windows(
     }
 
 
+@router.post("/api/call-windows")
+async def create_call_window(
+    request: CallWindowRequest,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    cw_service: CallWindowService = Depends(get_call_window_service),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create or replace one recurring call window from dashboard settings."""
+    user = await _resolve_user(principal, user_service)
+    _validate_dashboard_window_type(request.window_type)
+    try:
+        window = await cw_service.save_call_window(
+            user_id=user.id,
+            window_type=request.window_type,
+            start_time=_parse_hhmm(request.start_time, "start_time"),
+            end_time=_parse_hhmm(request.end_time, "end_time"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await _rematerialize_call_window(session, user, request.window_type)
+    return {
+        "window": {
+            "type": window.window_type,
+            "start_time": window.start_time.strftime("%H:%M"),
+            "end_time": window.end_time.strftime("%H:%M"),
+            "timezone": user.timezone or "UTC",
+            "is_active": window.is_active,
+        }
+    }
+
+
+@router.patch("/api/call-windows/{window_type}")
+async def update_call_window(
+    window_type: str,
+    request: CallWindowUpdateRequest,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    cw_service: CallWindowService = Depends(get_call_window_service),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Update one recurring call window from dashboard settings."""
+    user = await _resolve_user(principal, user_service)
+    _validate_dashboard_window_type(window_type)
+    if request.start_time is None and request.end_time is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one of start_time or end_time.",
+        )
+
+    windows = await cw_service.list_windows_for_user(user.id)
+    target = next((window for window in windows if window.window_type == window_type), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Call window not found")
+
+    try:
+        window = await cw_service.update_window(
+            window_id=target.id,
+            start_time=_parse_hhmm(request.start_time, "start_time")
+            if request.start_time
+            else None,
+            end_time=_parse_hhmm(request.end_time, "end_time")
+            if request.end_time
+            else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await _rematerialize_call_window(session, user, window_type)
+    return {
+        "window": {
+            "type": window.window_type,
+            "start_time": window.start_time.strftime("%H:%M"),
+            "end_time": window.end_time.strftime("%H:%M"),
+            "timezone": user.timezone or "UTC",
+            "is_active": window.is_active,
+        }
+    }
+
+
+@router.delete("/api/call-windows/{window_type}")
+async def delete_call_window(
+    window_type: str,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    cw_service: CallWindowService = Depends(get_call_window_service),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Deactivate one recurring call window from dashboard settings."""
+    user = await _resolve_user(principal, user_service)
+    _validate_dashboard_window_type(window_type)
+    windows = await cw_service.list_windows_for_user(user.id)
+    target = next((window for window in windows if window.window_type == window_type), None)
+    if target is None:
+        return {"status": "already_removed", "type": window_type}
+
+    window = await cw_service.deactivate_window(target.id)
+    await _rematerialize_call_window(session, user, window_type)
+    return {
+        "status": "removed",
+        "window": {
+            "type": window.window_type,
+            "start_time": window.start_time.strftime("%H:%M"),
+            "end_time": window.end_time.strftime("%H:%M"),
+            "timezone": user.timezone or "UTC",
+            "is_active": window.is_active,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/user/profile
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/call-history")
+async def get_call_history(
+    status: str | None = Query(None),
+    call_type: str | None = Query(None),
+    limit: int = Query(25, ge=1, le=100),
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return recent call history for the dashboard."""
+    user = await _resolve_user(principal, user_service)
+
+    query = select(CallLog).where(CallLog.user_id == user.id)
+    if status is not None:
+        valid_statuses = {item.value for item in CallLogStatus}
+        if status not in valid_statuses:
+            raise HTTPException(status_code=400, detail="Invalid call status.")
+        query = query.where(CallLog.status == status)
+    if call_type is not None:
+        valid_call_types = {item.value for item in CallType}
+        if call_type not in valid_call_types:
+            raise HTTPException(status_code=400, detail="Invalid call type.")
+        query = query.where(CallLog.call_type == call_type)
+
+    result = await session.exec(
+        query.order_by(
+            CallLog.scheduled_time.desc(),  # type: ignore[union-attr]
+            CallLog.id.desc(),  # type: ignore[union-attr]
+        ).limit(limit)
+    )
+    calls = list(result.all())
+    return {"calls": [_serialize_call(call) for call in calls], "count": len(calls)}
+
+
 # ---------------------------------------------------------------------------
 # GET /api/user/profile
 # ---------------------------------------------------------------------------
@@ -390,8 +769,155 @@ async def get_user_profile(
     return {
         "name": user.name,
         "phone": user.phone,
+        "timezone": user.timezone,
+        "onboarding_complete": user.onboarding_complete,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
+
+
+@router.patch("/api/user/profile")
+async def update_user_profile(
+    request: UserProfileUpdateRequest,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+):
+    """Update dashboard-editable user profile and preferences."""
+    if request.name is None and request.timezone is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one of name or timezone.",
+        )
+
+    updates: dict[str, object] = {}
+    if request.name is not None:
+        updates["name"] = request.name.strip() or None
+    if request.timezone is not None:
+        updates["timezone"] = request.timezone
+
+    try:
+        user = await user_service.update_preferences(principal.phone_number, **updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "name": user.name,
+        "phone": user.phone,
+        "timezone": user.timezone,
+        "onboarding_complete": user.onboarding_complete,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Goals
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/goals")
+async def get_goals(
+    status: str | None = Query(
+        GoalStatus.ACTIVE.value,
+        pattern="^(active|completed|abandoned)$",
+    ),
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    goal_service: GoalService = Depends(get_goal_service),
+):
+    """Return dashboard goals, optionally filtered by status."""
+    user = await _resolve_user(principal, user_service)
+    goals = await goal_service.list_goals(user_id=user.id, status=status)
+    return {"goals": [_serialize_goal(goal) for goal in goals]}
+
+
+@router.post("/api/goals")
+async def create_goal(
+    request: GoalCreateRequest,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    goal_service: GoalService = Depends(get_goal_service),
+):
+    """Create a dashboard goal."""
+    user = await _resolve_user(principal, user_service)
+    try:
+        goal = await goal_service.create_goal(
+            user_id=user.id,
+            title=request.title,
+            description=request.description,
+            target_date=request.target_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"goal": _serialize_goal(goal)}
+
+
+@router.patch("/api/goals/{goal_id}")
+async def update_goal(
+    goal_id: int,
+    request: GoalUpdateRequest,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    goal_service: GoalService = Depends(get_goal_service),
+):
+    """Update a dashboard goal by ID."""
+    user = await _resolve_user(principal, user_service)
+    try:
+        goal = await goal_service.update_goal(
+            goal_id=goal_id,
+            user_id=user.id,
+            new_title=request.title,
+            new_description=request.description,
+            new_target_date=request.target_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"goal": _serialize_goal(goal)}
+
+
+@router.post("/api/goals/{goal_id}/complete")
+async def complete_goal(
+    goal_id: int,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    goal_service: GoalService = Depends(get_goal_service),
+):
+    """Mark a dashboard goal completed."""
+    user = await _resolve_user(principal, user_service)
+    goal = await goal_service.complete_goal(goal_id=goal_id, user_id=user.id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"goal": _serialize_goal(goal)}
+
+
+@router.post("/api/goals/{goal_id}/abandon")
+async def abandon_goal(
+    goal_id: int,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    goal_service: GoalService = Depends(get_goal_service),
+):
+    """Mark a dashboard goal abandoned."""
+    user = await _resolve_user(principal, user_service)
+    goal = await goal_service.abandon_goal(goal_id=goal_id, user_id=user.id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"goal": _serialize_goal(goal)}
+
+
+@router.delete("/api/goals/{goal_id}")
+async def delete_goal(
+    goal_id: int,
+    principal: FirebasePrincipal = Depends(get_firebase_user),
+    user_service: UserService = Depends(get_user_service),
+    goal_service: GoalService = Depends(get_goal_service),
+):
+    """Permanently delete a dashboard goal."""
+    user = await _resolve_user(principal, user_service)
+    goal = await goal_service.delete_goal(goal_id=goal_id, user_id=user.id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"goal": _serialize_goal(goal), "status": "deleted"}
 
 
 # ---------------------------------------------------------------------------

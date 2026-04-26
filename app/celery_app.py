@@ -29,6 +29,8 @@ celery_app = Celery(
         "app.tasks.checkin",
         "app.tasks.weekly",
         "app.tasks.cleanup",
+        "app.tasks.draft_review",
+        "app.tasks.prefetch",
     ],
 )
 

@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.voice.cleanup import (
+    _missing_outcome_fallback_fields,
     _save_transcript_file,
     post_call_cleanup,
 )
@@ -89,7 +90,32 @@ def _mock_call_log(
     cl.call_type = call_type
     cl.scheduled_timezone = scheduled_timezone
     cl.transcript_filename = None
+    cl.call_outcome_confidence = None
+    cl.reflection_confidence = None
     return cl
+
+
+def test_missing_outcome_fallback_sets_none_for_morning():
+    call_log = _mock_call_log(call_type="morning")
+
+    assert _missing_outcome_fallback_fields(call_log, "morning") == {
+        "call_outcome_confidence": "none"
+    }
+
+
+def test_missing_outcome_fallback_does_not_overwrite_existing():
+    call_log = _mock_call_log(call_type="morning")
+    call_log.call_outcome_confidence = "clear"
+
+    assert _missing_outcome_fallback_fields(call_log, "morning") == {}
+
+
+def test_missing_outcome_fallback_sets_none_for_evening():
+    call_log = _mock_call_log(call_type="evening")
+
+    assert _missing_outcome_fallback_fields(call_log, "evening") == {
+        "reflection_confidence": "none"
+    }
 
 
 def _mock_user(user_id: int = 42):

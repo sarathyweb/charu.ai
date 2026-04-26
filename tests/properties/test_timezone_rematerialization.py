@@ -129,6 +129,7 @@ async def _count_call_logs(
     session: AsyncSession,
     user_id: int,
     call_type: str | None = None,
+    call_date: date | None = None,
     status: str | None = None,
     occurrence_kind: str | None = None,
 ) -> int:
@@ -136,6 +137,8 @@ async def _count_call_logs(
     stmt = select(CallLog).where(CallLog.user_id == user_id)
     if call_type is not None:
         stmt = stmt.where(CallLog.call_type == call_type)
+    if call_date is not None:
+        stmt = stmt.where(CallLog.call_date == call_date)
     if status is not None:
         stmt = stmt.where(CallLog.status == status)
     if occurrence_kind is not None:
@@ -191,13 +194,21 @@ async def test_window_edit_deletes_future_scheduled_planned(
         end_time=time(10, 0),
     )
 
+    original_date_count = await _count_call_logs(
+        session, user.id, call_type=window_type, call_date=_FUTURE_DATE,
+        status=CallLogStatus.SCHEDULED.value,
+        occurrence_kind=OccurrenceKind.PLANNED.value,
+    )
+    assert original_date_count == 0
+
     after = await _count_call_logs(
         session, user.id, call_type=window_type,
         status=CallLogStatus.SCHEDULED.value,
         occurrence_kind=OccurrenceKind.PLANNED.value,
     )
-    assert after == 0, (
-        f"Expected 0 future scheduled planned entries after window edit, got {after}"
+    assert after >= 1, (
+        "Expected replacement scheduled planned entries after rematerialization, "
+        f"got {after}"
     )
 
 
@@ -281,13 +292,21 @@ async def test_window_edit_only_deletes_matching_window_type(
         end_time=time(10, 0),
     )
 
-    # Morning entries should be deleted
+    # Original morning entry should be deleted and replacements materialized.
+    original_morning_date_count = await _count_call_logs(
+        session, user.id, call_type=WindowType.MORNING.value,
+        call_date=_FUTURE_DATE,
+        status=CallLogStatus.SCHEDULED.value,
+        occurrence_kind=OccurrenceKind.PLANNED.value,
+    )
+    assert original_morning_date_count == 0
+
     morning_count = await _count_call_logs(
         session, user.id, call_type=WindowType.MORNING.value,
         status=CallLogStatus.SCHEDULED.value,
         occurrence_kind=OccurrenceKind.PLANNED.value,
     )
-    assert morning_count == 0
+    assert morning_count >= 1
 
     # Afternoon entries should be preserved
     afternoon_count = await _count_call_logs(
@@ -372,12 +391,15 @@ async def test_window_edit_frees_unique_index_slot(
     session.add(new_log)
     await session.flush()  # Should NOT raise IntegrityError
 
-    count = await _count_call_logs(
+    count_for_original_date = await _count_call_logs(
         session, user.id, call_type=WindowType.MORNING.value,
+        call_date=_FUTURE_DATE,
         status=CallLogStatus.SCHEDULED.value,
         occurrence_kind=OccurrenceKind.PLANNED.value,
     )
-    assert count == 1, "New planned entry should be insertable after hard-delete"
+    assert count_for_original_date == 1, (
+        "New planned entry should be insertable after hard-delete"
+    )
 
 
 # ===================================================================

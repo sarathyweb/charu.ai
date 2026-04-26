@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from starlette.testclient import TestClient
 
 from app.api.auth_sync import router as auth_sync_router
 from app.api.chat import router as chat_router
@@ -85,6 +86,23 @@ class TestHealthEndpoint:
             resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+    @pytest.mark.asyncio
+    async def test_readiness_returns_503_when_dependency_fails(self):
+        app = _make_test_app()
+        payload = {
+            "status": "not_ready",
+            "checks": [{"name": "redis", "ok": False, "message": "down"}],
+        }
+        with patch("app.api.health.run_runtime_checks", AsyncMock(return_value=payload)):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                resp = await client.get("/health/ready")
+
+        assert resp.status_code == 503
+        assert resp.json() == payload
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +255,41 @@ class TestChatEndpoint:
                 )
 
         assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_stream_returns_sse_events(self):
+        """POST /api/chat/stream — authenticated SSE chat."""
+        app = _make_test_app()
+        _override_firebase_valid(app)
+        _override_services(app)
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/chat/stream",
+                json={"message": "Hello"},
+                headers={"Authorization": "Bearer fake_valid_jwt"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        assert "event: session" in resp.text
+        assert '"session_id": "sess-abc"' in resp.text
+        assert "event: delta" in resp.text
+        assert "Hello from agent" in resp.text
+        assert "event: done" in resp.text
+
+    def test_browser_voice_endpoint_explicitly_scoped_out(self):
+        """Browser voice WebSocket returns a clear unsupported payload."""
+        app = _make_test_app()
+        client = TestClient(app)
+
+        with client.websocket_connect("/ws/live/sess-abc") as websocket:
+            data = websocket.receive_json()
+
+        assert data["type"] == "unsupported"
+        assert data["session_id"] == "sess-abc"
+        assert data["error"] == "browser_voice_not_in_active_scope"
 
 
 # ---------------------------------------------------------------------------

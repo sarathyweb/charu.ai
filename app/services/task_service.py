@@ -257,6 +257,101 @@ class TaskService:
         return match
 
     # ------------------------------------------------------------------
+    # ID-based dashboard mutations
+    # ------------------------------------------------------------------
+
+    async def update_task_by_id(
+        self,
+        user_id: int,
+        task_id: int,
+        new_title: str | None = None,
+        new_priority: int | None = None,
+    ) -> Task | None:
+        """Update a task by ID for dashboard/API callers."""
+        if new_title is None and new_priority is None:
+            raise ValueError(
+                "At least one of new_title or new_priority must be provided."
+            )
+        if new_title is not None and not new_title.strip():
+            raise ValueError("new_title cannot be empty.")
+        if new_priority is not None and not 0 <= new_priority <= 100:
+            raise ValueError("new_priority must be between 0 and 100.")
+
+        task = await self._get_user_task(task_id, user_id)
+        if task is None:
+            return None
+
+        if new_title is not None:
+            task.title = new_title.strip()
+        if new_priority is not None:
+            task.priority = new_priority
+
+        self.session.add(task)
+        await self.session.commit()
+        await self.session.refresh(task)
+        return task
+
+    async def complete_task_by_id(self, user_id: int, task_id: int) -> Task | None:
+        """Mark a task completed by ID."""
+        task = await self._get_user_task(task_id, user_id)
+        if task is None:
+            return None
+
+        if task.status != TaskStatus.COMPLETED.value:
+            task.status = TaskStatus.COMPLETED.value
+            task.completed_at = datetime.now(timezone.utc)
+            task.snoozed_until = None
+            self.session.add(task)
+            await self.session.commit()
+            await self.session.refresh(task)
+        return task
+
+    async def delete_task_by_id(self, user_id: int, task_id: int) -> Task | None:
+        """Permanently delete a task by ID."""
+        task = await self._get_user_task(task_id, user_id)
+        if task is None:
+            return None
+
+        await self.session.delete(task)
+        await self.session.commit()
+        return task
+
+    async def snooze_task_by_id(
+        self,
+        user_id: int,
+        task_id: int,
+        snooze_until: datetime,
+    ) -> Task | None:
+        """Snooze a task by ID until a timezone-aware datetime."""
+        if snooze_until.tzinfo is None or snooze_until.utcoffset() is None:
+            raise ValueError("snooze_until must include a timezone offset.")
+
+        task = await self._get_user_task(task_id, user_id)
+        if task is None:
+            return None
+
+        task.status = TaskStatus.SNOOZED.value
+        task.snoozed_until = snooze_until
+        task.completed_at = None
+        self.session.add(task)
+        await self.session.commit()
+        await self.session.refresh(task)
+        return task
+
+    async def unsnooze_task_by_id(self, user_id: int, task_id: int) -> Task | None:
+        """Reactivate a snoozed task by ID."""
+        task = await self._get_user_task(task_id, user_id)
+        if task is None:
+            return None
+
+        task.status = TaskStatus.PENDING.value
+        task.snoozed_until = None
+        self.session.add(task)
+        await self.session.commit()
+        await self.session.refresh(task)
+        return task
+
+    # ------------------------------------------------------------------
     # list_pending_tasks
     # ------------------------------------------------------------------
 
@@ -311,6 +406,30 @@ class TaskService:
         )
         return list(result.all())
 
+    async def list_snoozed_tasks(
+        self,
+        user_id: int,
+        limit: int = 50,
+    ) -> list[Task]:
+        """Return snoozed tasks ordered by snooze time then priority."""
+        limit = self._normalize_limit(limit, default=50)
+        await self._reactivate_due_snoozed_tasks(user_id)
+
+        result = await self.session.exec(
+            select(Task)
+            .where(
+                Task.user_id == user_id,
+                Task.status == TaskStatus.SNOOZED.value,
+            )
+            .order_by(
+                Task.snoozed_until.asc(),  # type: ignore[union-attr]
+                Task.priority.desc(),  # type: ignore[union-attr]
+                Task.created_at.desc(),  # type: ignore[union-attr]
+            )
+            .limit(limit)
+        )
+        return list(result.all())
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -340,6 +459,16 @@ class TaskService:
                 Task.created_at.desc(),  # type: ignore[union-attr]
             )
             .limit(1)
+        )
+        return result.first()
+
+    async def _get_user_task(self, task_id: int, user_id: int) -> Task | None:
+        """Return a task only when it belongs to the given user."""
+        result = await self.session.exec(
+            select(Task).where(
+                Task.id == task_id,
+                Task.user_id == user_id,
+            )
         )
         return result.first()
 

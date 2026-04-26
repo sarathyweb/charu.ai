@@ -148,6 +148,32 @@ async def test_token_clear_on_401_does_not_commit_caller_session():
     caller_session.execute.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_google_api_timeout_returns_structured_error():
+    """A slow Google client call returns google_timeout instead of hanging."""
+    user = _make_user()
+    creds = _make_credentials()
+    caller_session = AsyncMock()
+
+    async def mock_to_thread(fn, *args, **kwargs):  # noqa: ARG001
+        raise TimeoutError
+
+    with patch(
+        "app.services.google_api_wrapper.asyncio.to_thread",
+        side_effect=mock_to_thread,
+    ):
+        result = await google_api_call(
+            user=user,
+            credentials=creds,
+            api_callable=lambda: None,
+            session=caller_session,
+            timeout_seconds=0.01,
+        )
+
+    assert result["error"] == "google_timeout"
+    caller_session.commit.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Tests: internal helpers use independent session
 # ---------------------------------------------------------------------------

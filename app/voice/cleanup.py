@@ -29,7 +29,7 @@ from pathlib import Path
 from app.db import async_session_factory
 from app.models.call_log import CallLog
 from app.models.email_draft_state import EmailDraftState
-from app.models.enums import CallLogStatus, CallType, DraftStatus
+from app.models.enums import CallLogStatus, CallType, DraftStatus, OutcomeConfidence
 from app.models.user import User
 from app.services.anti_habituation import update_streak
 from app.services.call_log_service import (
@@ -42,6 +42,27 @@ logger = logging.getLogger(__name__)
 
 #: Directory where transcript JSON files are stored.
 TRANSCRIPT_DIR = os.environ.get("TRANSCRIPT_DIR", "data/transcripts")
+
+
+def _missing_outcome_fallback_fields(
+    call_log: CallLog,
+    call_type: str,
+) -> dict[str, str]:
+    """Return fallback outcome fields needed before completing a call.
+
+    The voice prompt instructs the model to call a save-outcome tool, but
+    cleanup is the final deterministic guard. Persisting explicit ``none``
+    confidence prevents completed calls from having ambiguous null outcomes.
+    """
+    actual_type = call_type or call_log.call_type
+    if actual_type == CallType.EVENING.value:
+        if call_log.reflection_confidence is None:
+            return {"reflection_confidence": OutcomeConfidence.NONE.value}
+        return {}
+
+    if call_log.call_outcome_confidence is None:
+        return {"call_outcome_confidence": OutcomeConfidence.NONE.value}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -307,17 +328,27 @@ async def post_call_cleanup(
                 return
 
             user_timezone = call_log.scheduled_timezone
+            fallback_fields = _missing_outcome_fallback_fields(call_log, call_type)
+            if fallback_fields:
+                logger.warning(
+                    "post_call_cleanup: CallLog %d missing outcome tool result; "
+                    "persisting fallback %s",
+                    call_log_id,
+                    fallback_fields,
+                )
 
             # Only transition if currently in_progress
             if call_log.status == CallLogStatus.IN_PROGRESS.value:
                 svc = CallLogService(session)
                 try:
+                    update_fields = {"transcript_filename": transcript_filename}
+                    update_fields.update(fallback_fields)
                     call_log = await svc.update_status(
                         call_log_id,
                         CallLogStatus.COMPLETED,
                         expected_version=call_log.version,
                         end_time=now_utc,
-                        transcript_filename=transcript_filename,
+                        **update_fields,
                     )
                 except (StaleVersionError, InvalidTransitionError) as exc:
                     logger.warning(
@@ -325,9 +356,12 @@ async def post_call_cleanup(
                         call_log_id,
                         exc,
                     )
-            elif transcript_filename:
+            elif transcript_filename or fallback_fields:
                 # Already in a terminal state but we still want the transcript
-                call_log.transcript_filename = transcript_filename
+                if transcript_filename:
+                    call_log.transcript_filename = transcript_filename
+                for field, value in fallback_fields.items():
+                    setattr(call_log, field, value)
                 session.add(call_log)
                 await session.commit()
     except Exception:

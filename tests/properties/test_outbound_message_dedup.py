@@ -369,6 +369,111 @@ async def test_fresh_pending_claim_is_not_reclaimed(session):
     wa.send_template_message.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_stale_sending_claim_is_reclaimed(session):
+    """A sending row older than CLAIM_TTL_SECONDS is reclaimed by a new worker."""
+    from app.services.outbound_message_service import CLAIM_TTL_SECONDS
+
+    user = await _ensure_user(session)
+    stale_time = datetime.now(timezone.utc) - timedelta(seconds=CLAIM_TTL_SECONDS + 60)
+    await session.execute(
+        text(
+            "INSERT INTO outbound_messages "
+            "(user_id, dedup_key, status, created_at, claim_token) "
+            "VALUES (:uid, :key, :status, :ts, :token)"
+        ),
+        {
+            "uid": user.id,
+            "key": "recap:402",
+            "status": OutboundMessageStatus.SENDING.value,
+            "ts": stale_time,
+            "token": "old-token",
+        },
+    )
+    await session.commit()
+
+    wa = _make_wa_service(template_sid="SM_reclaimed_sending")
+    svc = OutboundMessageService(session=session, whatsapp_service=wa)
+    sid = await svc.send_template_dedup(
+        user_id=user.id,
+        dedup_key="recap:402",
+        to=user.phone,
+        content_sid="HX_template",
+    )
+
+    assert sid == "SM_reclaimed_sending"
+    wa.send_template_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fresh_sending_claim_is_not_reclaimed(session):
+    """A fresh sending row is protected from duplicate Twilio sends."""
+    user = await _ensure_user(session)
+    fresh_time = datetime.now(timezone.utc) - timedelta(seconds=10)
+    await session.execute(
+        text(
+            "INSERT INTO outbound_messages "
+            "(user_id, dedup_key, status, created_at, claim_token) "
+            "VALUES (:uid, :key, :status, :ts, :token)"
+        ),
+        {
+            "uid": user.id,
+            "key": "recap:403",
+            "status": OutboundMessageStatus.SENDING.value,
+            "ts": fresh_time,
+            "token": "active-token",
+        },
+    )
+    await session.commit()
+
+    wa = _make_wa_service(template_sid="SM_should_not_send")
+    svc = OutboundMessageService(session=session, whatsapp_service=wa)
+    sid = await svc.send_template_dedup(
+        user_id=user.id,
+        dedup_key="recap:403",
+        to=user.phone,
+        content_sid="HX_template",
+    )
+
+    assert sid is None
+    wa.send_template_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stale_token_cannot_mark_sent(session):
+    """A worker with an old claim token cannot mutate a reclaimed row."""
+    user = await _ensure_user(session)
+    await session.execute(
+        text(
+            "INSERT INTO outbound_messages "
+            "(user_id, dedup_key, status, claim_token) "
+            "VALUES (:uid, :key, :status, :token)"
+        ),
+        {
+            "uid": user.id,
+            "key": "recap:404",
+            "status": OutboundMessageStatus.SENDING.value,
+            "token": "fresh-token",
+        },
+    )
+    await session.commit()
+
+    svc = OutboundMessageService(session=session, whatsapp_service=_make_wa_service())
+    marked = await svc._mark_sent(
+        dedup_key="recap:404",
+        twilio_message_sid="SM_stale",
+        token="stale-token",
+    )
+
+    assert marked is False
+    result = await session.exec(
+        select(OutboundMessage).where(OutboundMessage.dedup_key == "recap:404")
+    )
+    row = result.one()
+    assert row.status == OutboundMessageStatus.SENDING.value
+    assert row.twilio_message_sid is None
+
+
 # ---------------------------------------------------------------------------
 # Partial send (WhatsAppPartialSendError)
 # ---------------------------------------------------------------------------

@@ -5,10 +5,10 @@
     {
       "id": "weekend_mode",
       "title": "Weekend mode",
-      "status": "deferred_needs_spec",
+      "status": "implemented_tone_only",
       "owner_area": "voice_call_behavior",
-      "decision": "Keep in active backlog until call timing, tone, and opt-in behavior are specified.",
-      "next_step": "Define weekend call copy, eligible call windows, and whether weekend calls are opt-in or automatic."
+      "decision": "Implemented the no-migration tone-only version for voice calls: weekend-local calls use lighter, optional prompt guidance.",
+      "next_step": "Specify opt-in scheduling or weekend-specific call windows separately before changing planner behavior."
     },
     {
       "id": "urgent_email_calls",

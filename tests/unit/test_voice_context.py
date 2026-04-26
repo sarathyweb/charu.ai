@@ -331,6 +331,14 @@ class TestBuildMorningInstruction:
         assert "Before calling a tool" in instruction
         assert "After a tool returns" in instruction
 
+    def test_weekend_mode_included_when_flagged(self):
+        instruction = build_system_instruction(
+            "morning",
+            self._make_ctx(is_weekend=True),
+        )
+        assert "Weekend Mode" in instruction
+        assert "lighter" in instruction
+
 
 # ---------------------------------------------------------------------------
 # build_system_instruction — evening
@@ -414,6 +422,14 @@ class TestBuildEveningInstruction:
     def test_no_shame_language_rule(self):
         instruction = build_system_instruction("evening", self._make_ctx())
         assert "NEVER use shame" in instruction
+
+    def test_weekend_mode_included_when_flagged(self):
+        instruction = build_system_instruction(
+            "evening",
+            self._make_ctx(is_weekend=True),
+        )
+        assert "Weekend Mode" in instruction
+        assert "gentle" in instruction
 
 
 @pytest.mark.asyncio

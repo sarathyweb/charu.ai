@@ -8,6 +8,7 @@ Tests cover:
 """
 
 from datetime import datetime, time, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -36,13 +37,16 @@ async def svc(session: AsyncSession) -> CallWindowService:
 
 
 async def _create_user(
-    session: AsyncSession, phone: str, tz: str = "America/New_York"
+    session: AsyncSession,
+    phone: str,
+    tz: str = "America/New_York",
+    onboarding_complete: bool = False,
 ) -> User:
     """Insert a test user and return it."""
     user = User(
         phone=phone,
         timezone=tz,
-        onboarding_complete=False,
+        onboarding_complete=onboarding_complete,
         consecutive_active_days=0,
     )
     session.add(user)
@@ -172,6 +176,29 @@ class TestSaveCallWindow:
 
         deleted_cl = await session.get(CallLog, cl_id)
         assert deleted_cl is None
+
+    @pytest.mark.asyncio
+    async def test_rematerializes_for_onboarded_user_on_time_change(
+        self, session, svc, monkeypatch
+    ):
+        user = await _create_user(
+            session, "+15551000071", onboarding_complete=True
+        )
+        await svc.save_call_window(
+            user.id, WindowType.MORNING.value, time(7, 0), time(8, 0)
+        )
+        rematerialize = AsyncMock(return_value=2)
+        monkeypatch.setattr(
+            "app.services.call_window_service.rematerialize_future_calls",
+            rematerialize,
+        )
+
+        await svc.save_call_window(
+            user.id, WindowType.MORNING.value, time(7, 30), time(8, 30)
+        )
+
+        rematerialize.assert_awaited_once()
+        assert rematerialize.await_args.kwargs["window_type_filter"] == "morning"
 
     @pytest.mark.asyncio
     async def test_no_delete_when_times_unchanged(self, session, svc):

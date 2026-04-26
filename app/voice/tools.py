@@ -164,11 +164,9 @@ async def _rematerialize_call_window_if_ready(session, user: User, window_type: 
         return
 
     try:
-        from app.agents.productivity_agent.onboarding_tools import (
-            _rematerialize_future_calls,
-        )
+        from app.services.call_materialization_service import rematerialize_future_calls
 
-        await _rematerialize_future_calls(
+        await rematerialize_future_calls(
             session,
             user,
             window_type_filter=window_type,

@@ -1,9 +1,8 @@
 """CallWindowService — CRUD and lifecycle management for call windows.
 
 Handles validation, upsert, listing, updating, and deactivation of
-call windows.  On window edits, hard-deletes future scheduled planned
-CallLog entries for that window type and leaves a TODO for
-rematerialization (implemented in task 6.2).
+call windows. On active-window edits, future scheduled planned CallLog
+entries are hard-deleted and immediately rematerialized for onboarded users.
 """
 
 import logging
@@ -17,6 +16,7 @@ from app.models.call_log import CallLog
 from app.models.call_window import CallWindow
 from app.models.enums import CallLogStatus, OccurrenceKind
 from app.models.user import User
+from app.services.call_materialization_service import rematerialize_future_calls
 from app.services.call_window_validation import validate_call_window
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,7 @@ class CallWindowService:
 
             if times_changed:
                 await self._hard_delete_future_planned(user_id, window_type)
+                await self._rematerialize_if_ready(user, window_type)
 
             await self.session.commit()
             await self.session.refresh(existing)
@@ -100,6 +101,8 @@ class CallWindowService:
             is_active=True,
         )
         self.session.add(window)
+        await self.session.flush()
+        await self._rematerialize_if_ready(user, window_type)
         await self.session.commit()
         await self.session.refresh(window)
         return window
@@ -163,6 +166,7 @@ class CallWindowService:
 
         if times_changed:
             await self._hard_delete_future_planned(window.user_id, window.window_type)
+            await self._rematerialize_if_ready(user, window.window_type)
 
         await self.session.commit()
         await self.session.refresh(window)
@@ -251,7 +255,22 @@ class CallWindowService:
                 window_type,
             )
 
-        # TODO (task 6.2): Rematerialize CallLog entries with the new
-        # window times after the daily planner is implemented.
-
         return deleted
+
+    async def _rematerialize_if_ready(self, user: User, window_type: str) -> int:
+        """Rematerialize active planned calls for onboarded users."""
+        if not user.onboarding_complete:
+            return 0
+        try:
+            return await rematerialize_future_calls(
+                self.session,
+                user,
+                window_type_filter=window_type,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to rematerialize calls for user_id=%s type=%s",
+                user.id,
+                window_type,
+            )
+            raise

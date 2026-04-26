@@ -38,6 +38,28 @@ _AUTH_ERROR_CODES = frozenset({401, 403})
 
 # HTTP status codes that are retryable.
 _RETRYABLE_CODES = frozenset({429, 500, 502, 503, 504})
+_MAX_CONCURRENT_GOOGLE_CALLS = 8
+_DEFAULT_TIMEOUT_SECONDS = 20.0
+_google_api_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_google_api_semaphore() -> asyncio.Semaphore:
+    global _google_api_semaphore
+    if _google_api_semaphore is None:
+        _google_api_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_GOOGLE_CALLS)
+    return _google_api_semaphore
+
+
+async def _run_google_callable(
+    api_callable: Callable[[], Any],
+    timeout_seconds: float | None,
+) -> Any:
+    """Run a synchronous Google API callable with bounded concurrency."""
+    async with _get_google_api_semaphore():
+        if timeout_seconds is None:
+            return await asyncio.to_thread(api_callable)
+        async with asyncio.timeout(timeout_seconds):
+            return await asyncio.to_thread(api_callable)
 
 
 async def _clear_google_tokens(user_id: int) -> None:
@@ -107,6 +129,7 @@ async def google_api_call(
     *,
     max_retries: int | None = None,
     backoff_seconds: tuple[int, ...] | None = None,
+    timeout_seconds: float | None = _DEFAULT_TIMEOUT_SECONDS,
 ) -> Any:
     """Execute a Google API call with automatic token-refresh persistence and error handling.
 
@@ -136,6 +159,9 @@ async def google_api_call(
     backoff_seconds:
         Optional override for retry delays on retryable errors. ``None`` keeps
         the default wrapper behavior.
+    timeout_seconds:
+        Per-attempt timeout for the synchronous Google client call. ``None``
+        disables the timeout.
 
     Returns
     -------
@@ -149,13 +175,27 @@ async def google_api_call(
         token_before = credentials.token
 
         try:
-            result = await asyncio.to_thread(api_callable)
+            result = await _run_google_callable(api_callable, timeout_seconds)
 
             # Check if google-auth silently refreshed the access token.
             if credentials.token != token_before:
                 await _persist_refreshed_token(user.id, credentials)
 
             return result
+
+        except TimeoutError:
+            logger.warning(
+                "Google API call timed out for user %s after %.1fs",
+                user.id,
+                timeout_seconds or 0,
+            )
+            return {
+                "error": "google_timeout",
+                "message": (
+                    "Google API took too long to respond. "
+                    "Please try again in a moment."
+                ),
+            }
 
         except RefreshError as exc:
             logger.warning(

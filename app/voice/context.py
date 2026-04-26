@@ -70,6 +70,11 @@ def _user_today(user: User) -> date:
     return datetime.now(timezone.utc).date()
 
 
+def _is_user_weekend(user: User) -> bool:
+    """Return True when it is Saturday/Sunday in the user's timezone."""
+    return _user_today(user).weekday() >= 5
+
+
 # ---------------------------------------------------------------------------
 # Helper: fetch yesterday's completed call outcome
 # ---------------------------------------------------------------------------
@@ -250,6 +255,7 @@ async def build_morning_context(
         "new_last_active": new_last_active,
         "two_week_variation": variation_text,
         "available_context": available_context,
+        "is_weekend": _is_user_weekend(user),
     }
 
 
@@ -362,6 +368,7 @@ async def build_evening_context(
         "streak_days": new_streak,
         "new_last_active": new_last_active,
         "two_week_variation": variation_text,
+        "is_weekend": _is_user_weekend(user),
     }
 
 
@@ -514,6 +521,14 @@ def _build_morning_instruction(
             variation,
         ])
 
+    if ctx.get("is_weekend"):
+        parts.extend([
+            "",
+            "## Weekend Mode",
+            "Keep the call lighter and more optional. Prioritize personal "
+            "tasks, recovery, and one small satisfying action over work pressure.",
+        ])
+
     parts.extend([
         "",
         "## Call Flow",
@@ -615,6 +630,14 @@ def _build_evening_instruction(ctx: dict[str, Any]) -> str:
             "",
             "## Special Variation",
             variation,
+        ])
+
+    if ctx.get("is_weekend"):
+        parts.extend([
+            "",
+            "## Weekend Mode",
+            "Keep the reflection gentle. Celebrate rest, personal progress, "
+            "and small wins without pushing productivity pressure.",
         ])
 
     parts.extend([

@@ -27,6 +27,18 @@ class Settings(BaseSettings):
     # Twilio voice number for outbound calls (E.164 format)
     TWILIO_VOICE_NUMBER: str = ""
 
+    # Twilio Content API template SIDs
+    TWILIO_CONTENT_SID_DAILY_RECAP: str = ""
+    TWILIO_CONTENT_SID_DAILY_RECAP_NO_GOAL: str = ""
+    TWILIO_CONTENT_SID_EVENING_RECAP: str = ""
+    TWILIO_CONTENT_SID_EVENING_RECAP_NO_ACCOMPLISHMENTS: str = ""
+    TWILIO_CONTENT_SID_MIDDAY_CHECKIN: str = ""
+    TWILIO_CONTENT_SID_MIDDAY_CHECKIN_V2: str = ""
+    TWILIO_CONTENT_SID_MIDDAY_CHECKIN_V3: str = ""
+    TWILIO_CONTENT_SID_WEEKLY_SUMMARY: str = ""
+    TWILIO_CONTENT_SID_MISSED_CALL_ENCOURAGEMENT: str = ""
+    TWILIO_CONTENT_SID_EMAIL_DRAFT_REVIEW: str = ""
+
     # Google OAuth 2.0 client credentials
     GOOGLE_OAUTH_CLIENT_ID: str = ""
     GOOGLE_OAUTH_CLIENT_SECRET: str = ""

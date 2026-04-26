@@ -33,6 +33,10 @@ from app.services.call_log_service import (
     InvalidTransitionError,
     StaleVersionError,
 )
+from app.services.call_context_cache import (
+    delete_call_context,
+    get_cached_call_context,
+)
 from app.services.outbound_message_service import OutboundMessageService
 from app.services.scheduling_helpers import MAX_RETRIES, RETRY_DELAY_SECONDS
 from app.services.whatsapp_service import WhatsAppService, build_missed_call_params
@@ -42,6 +46,27 @@ from app.voice.disconnect import EarlyDisconnectDetector
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _load_system_instruction_for_call(
+    call_log_id: int,
+    user_id: int,
+    call_type: str,
+) -> tuple[str, dict]:
+    """Load prebuilt voice context from Redis, falling back to live assembly."""
+    cached = await get_cached_call_context(call_log_id)
+    if cached is not None:
+        logger.info("voice/stream: using cached context for call_log_id=%d", call_log_id)
+        return cached
+
+    from app.voice.context import prepare_call_context
+
+    async with async_session_factory() as ctx_session:
+        return await prepare_call_context(
+            user_id=user_id,
+            call_type=call_type,
+            session=ctx_session,
+        )
 
 
 async def _validate_token_from_query(websocket: WebSocket) -> dict | None:
@@ -429,17 +454,14 @@ async def voice_stream(websocket: WebSocket) -> None:
         # ------------------------------------------------------------------
         # Step 6b: Build pre-call context and system instruction
         # ------------------------------------------------------------------
-        from app.voice.context import prepare_call_context
-
         system_instruction = ""
         context_started_at = perf_counter()
         try:
-            async with async_session_factory() as ctx_session:
-                system_instruction, call_ctx = await prepare_call_context(
-                    user_id=token_user_id,
-                    call_type=call_type,
-                    session=ctx_session,
-                )
+            system_instruction, call_ctx = await _load_system_instruction_for_call(
+                call_log_id=token_call_log_id,
+                user_id=token_user_id,
+                call_type=call_type,
+            )
             logger.info(
                 "voice/stream: built system instruction for "
                 "call_log_id=%d (%d chars, %.1fms)",
@@ -608,6 +630,17 @@ async def voice_stream(websocket: WebSocket) -> None:
                         "call_log_id=%d",
                         token_call_log_id,
                     )
+
+        if token_call_log_id is not None:
+            try:
+                await delete_call_context(token_call_log_id)
+            except Exception:
+                logger.warning(
+                    "voice/stream: failed to delete cached context for "
+                    "call_log_id=%d",
+                    token_call_log_id,
+                    exc_info=True,
+                )
 
         logger.info(
             "voice/stream: connection ended for call_log_id=%s, "
