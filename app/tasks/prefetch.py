@@ -37,6 +37,7 @@ async def _run_prefetch_call_context(call_log_id: int) -> str:
             user_id=call_log.user_id,
             call_type=call_log.call_type,
             session=session,
+            call_log_id=call_log_id,
         )
 
     await store_call_context(call_log_id, instruction, call_ctx)

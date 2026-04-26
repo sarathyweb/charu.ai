@@ -72,6 +72,22 @@ class TaskSource(str, Enum):
     IMPORT = "import"
 
 
+class EmailAutomationEventType(str, Enum):
+    """EmailAutomationEvent.event_type."""
+
+    URGENT_CALL = "urgent_call"
+    AUTO_TASK = "auto_task"
+
+
+class EmailAutomationStatus(str, Enum):
+    """EmailAutomationEvent.status."""
+
+    PROCESSING = "processing"
+    CREATED = "created"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
 class GoalStatus(str, Enum):
     """Goal.status."""
 

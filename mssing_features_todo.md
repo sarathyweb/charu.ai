@@ -13,7 +13,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Reviewed frontend surface: `website`
 - [x] Reviewed test coverage under `tests`
 - [x] Used subagents for documentation/planning, agents/voice, backend services/API/tasks/models, and tests
-- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`, `.pm/research/80-calendar-gmail-full-tools-expansion.md`, `.pm/research/82-voice-full-tools-parity.md`, `.pm/research/83-dashboard-api-feature-closure.md`, `.pm/research/84-voice-reliability-feature-closure.md`, `.pm/research/88-pending-feature-closure-audit.md`, `.pm/research/89-hybrid-embedding-task-deduplication.md`
+- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`, `.pm/research/80-calendar-gmail-full-tools-expansion.md`, `.pm/research/82-voice-full-tools-parity.md`, `.pm/research/83-dashboard-api-feature-closure.md`, `.pm/research/84-voice-reliability-feature-closure.md`, `.pm/research/88-pending-feature-closure-audit.md`, `.pm/research/89-hybrid-embedding-task-deduplication.md`, `.pm/research/90-email-automation-urgent-calls-auto-tasks.md`
 
 ## Implemented / Working Features
 
@@ -50,9 +50,11 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Calendar write support exists for finding available gaps, creating task time blocks, and creating/updating/deleting general events.
 - [x] Gmail read support exists for emails needing reply, searching inbox, reading the top query match, and fetching a selected email for reply.
 - [x] Gmail write support exists for composing new emails, archiving messages, and draft-reviewed reply send flows with duplicate-send prevention.
+- [x] Gmail automation exists for opted-in urgent-email proactive calls and auto-task creation with thread dedupe, confidence gates, quiet hours, and rate limits.
+- [x] Website dashboard settings expose Gmail automation opt-ins and quiet-hour controls through the authenticated profile API.
 - [x] Dashboard API exists for summary metrics, tasks, schedule, profile, progress history, and integrations.
 - [x] Website app exists under `website`, with dashboard, authenticated chat, login/onboarding entry, and integrations pages.
-- [x] Backend test suite is broad and currently passes with `832 passed, 1 skipped, 73 warnings`.
+- [x] Backend test suite is broad and currently passes with `839 passed, 1 skipped, 73 warnings`.
 
 ## Partial / Needs Verification
 
@@ -115,8 +117,8 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Add dashboard connection-management polish through authenticated connect/disconnect OAuth paths.
 - [x] Implement hybrid embedding-based task deduplication beyond pg_trgm/fuzzy matching with Azure OpenAI `text-embedding-3-large`, env-driven credentials, configurable threshold/backfill limits, JSONB task embeddings, and safe fallback when embeddings are unavailable.
 - [x] Add weekend mode as tone-only local-weekend voice guidance.
-- [x] Explicitly defer urgent-email proactive call behavior until escalation rules, opt-in, quiet hours, rate limits, and thread dedupe are specified.
-- [x] Explicitly defer auto-task creation from emails until extraction confidence, review policy, ignored senders, and message/thread tracking are specified.
+- [x] Implement urgent-email proactive call behavior with deterministic escalation scoring, opt-in, quiet hours, rate limits, and thread dedupe.
+- [x] Implement auto-task creation from emails with deterministic extraction confidence, ignored senders, and message/thread tracking.
 - [x] Defer Notion integration because it is not in active scope; current docs describe it as deferred until OAuth/workspace mapping is specified.
 - [x] Defer Google Keep integration because it is not in active scope; current docs describe it as deferred until API viability and mapping are specified.
 - [x] Defer Google Tasks/Todoist import because it is not in active scope; current implementation evidence was not found and import semantics need specs.
@@ -124,7 +126,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 
 ## Test Coverage TODO
 
-- [x] Ran backend verification: `uv run pytest -q` passed with `832 passed, 1 skipped, 73 warnings`.
+- [x] Ran backend verification: `uv run pytest -q` passed with `839 passed, 1 skipped, 73 warnings`.
 - [x] Ran frontend verification: `npm run test`, `npm run lint`, and `npm run build` passed for the website app.
 - [x] Add ADK eval datasets for core scenarios: onboarding completion, task capture, task completion, calendar scheduling, Gmail reply, call management, and refusal/error handling.
 - [x] Add tests that assert task-tool registration and required ADK schemas for update/delete/snooze/unsnooze/list-pending parity.

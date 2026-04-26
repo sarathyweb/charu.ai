@@ -198,6 +198,10 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: trigram matching is local, deterministic, and cheap for obvious duplicates, while embeddings catch paraphrases after user/status filtering. The embedding path is feature-flagged because task titles are sent to Azure OpenAI and incur external API cost.
   Source: `.pm/research/89-hybrid-embedding-task-deduplication.md`
 
+- 2026-04-26: Gmail automation uses deterministic scoring plus per-user opt-ins before creating tasks or scheduling urgent-email calls.
+  Rationale: proactive calls and automatic task creation are user-trust sensitive. Rule-based scoring, ignored-sender filters, thread dedupe, quiet hours, and rate limits give a predictable baseline that can be tested before any model-based classifier is introduced.
+  Source: `.pm/research/90-email-automation-urgent-calls-auto-tasks.md`
+
 ## Tech Stack
 
 - Python 3.10+

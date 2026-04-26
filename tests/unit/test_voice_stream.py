@@ -355,6 +355,7 @@ class TestVoiceStreamContextLoading:
             user_id=42,
             call_type="morning",
             session=mock_session,
+            call_log_id=1,
         )
 
     @pytest.mark.asyncio

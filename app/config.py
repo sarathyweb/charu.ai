@@ -57,6 +57,19 @@ class Settings(BaseSettings):
     TASK_EMBEDDING_SIMILARITY_THRESHOLD: float = 0.88
     TASK_EMBEDDING_BACKFILL_LIMIT: int = 25
 
+    # Gmail automation. Per-user opt-in is still required in addition to
+    # these global switches.
+    EMAIL_AUTOMATION_ENABLED: bool = True
+    URGENT_EMAIL_CALLS_ENABLED: bool = True
+    AUTO_TASK_FROM_EMAILS_ENABLED: bool = True
+    EMAIL_AUTOMATION_LOOKBACK_DAYS: int = 2
+    EMAIL_AUTOMATION_MAX_MESSAGES_PER_USER: int = 10
+    URGENT_EMAIL_CALL_DELAY_MINUTES: int = 2
+    URGENT_EMAIL_CALL_COOLDOWN_MINUTES: int = 240
+    URGENT_EMAIL_CALL_MAX_PER_DAY: int = 1
+    URGENT_EMAIL_MIN_SCORE: float = 0.65
+    AUTO_TASK_EMAIL_MIN_SCORE: float = 0.7
+
     # Fernet key for encrypting OAuth tokens at rest.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     OAUTH_TOKEN_ENCRYPTION_KEY: str = ""

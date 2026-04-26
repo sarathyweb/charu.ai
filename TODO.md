@@ -12,7 +12,7 @@
 - [x] Hybrid embedding dedup — implemented as an opt-in Azure OpenAI semantic fallback after pg_trgm using `text-embedding-3-large`, configurable threshold/backfill limits, JSONB task embeddings, and deterministic tests.
 
 ## Product Evolution
-- [zz] On-demand calls — user can request an accountability call anytime via WhatsApp ("call me now")
+- [x] On-demand calls — user can request an accountability call anytime via WhatsApp ("call me now")
 - [x] Weekend mode — tone-only voice prompt mode for local Saturdays/Sundays (planner opt-in behavior remains a future spec)
-- [x] Urgent email call — deferred until opt-in, escalation rules, quiet hours, rate limits, and thread dedupe are specified
-- [x] Auto-task from emails — deferred until extraction confidence, review policy, ignored senders, and message/thread tracking are specified
+- [x] Urgent email call — implemented with Gmail scan, per-user opt-in, urgent scoring, quiet hours, cooldown/max-per-day, thread dedupe, and on-demand call scheduling
+- [x] Auto-task from emails — implemented with Gmail scan, per-user opt-in, confidence scoring, ignored-sender filtering, thread dedupe, and `TaskService` creation

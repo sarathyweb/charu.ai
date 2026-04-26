@@ -381,12 +381,23 @@ async def test_dashboard_profile_call_window_and_call_history_routes(session):
     cw_service = CallWindowService(session)
 
     profile = await update_user_profile(
-        UserProfileUpdateRequest(name="Asha", timezone="America/New_York"),
+        UserProfileUpdateRequest(
+            name="Asha",
+            timezone="America/New_York",
+            urgent_email_calls_enabled=True,
+            auto_task_from_emails_enabled=True,
+            email_automation_quiet_hours_start=time(22, 0),
+            email_automation_quiet_hours_end=time(7, 30),
+        ),
         principal=principal,
         user_service=user_service,
     )
     assert profile["name"] == "Asha"
     assert profile["timezone"] == "America/New_York"
+    assert profile["urgent_email_calls_enabled"] is True
+    assert profile["auto_task_from_emails_enabled"] is True
+    assert profile["email_automation_quiet_hours_start"] == "22:00"
+    assert profile["email_automation_quiet_hours_end"] == "07:30"
 
     created_window = await create_call_window(
         CallWindowRequest(

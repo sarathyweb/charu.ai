@@ -1,8 +1,8 @@
 """User SQLModel — database table and related schemas."""
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Boolean, Column, DateTime, Time, text
 from sqlmodel import Field, SQLModel
 
 from app.models.mixins import TimestampMixin
@@ -46,4 +46,31 @@ class User(TimestampMixin, SQLModel, table=True):
     last_user_whatsapp_message_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True),
         default=None,
+    )
+
+    # Email automation opt-ins. Defaults stay off until the user explicitly
+    # enables them from settings or an internal admin flow.
+    urgent_email_calls_enabled: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=text("false")),
+    )
+    auto_task_from_emails_enabled: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=text("false")),
+    )
+    email_automation_quiet_hours_start: time = Field(
+        default=time(21, 0),
+        sa_column=Column(
+            Time(timezone=False),
+            nullable=False,
+            server_default="21:00:00",
+        ),
+    )
+    email_automation_quiet_hours_end: time = Field(
+        default=time(8, 0),
+        sa_column=Column(
+            Time(timezone=False),
+            nullable=False,
+            server_default="08:00:00",
+        ),
     )

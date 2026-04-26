@@ -7,7 +7,12 @@ requiring a database. DB-dependent integration is tested separately.
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+
+# ---------------------------------------------------------------------------
+# Helpers to build test objects
+# ---------------------------------------------------------------------------
+from dataclasses import dataclass
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -15,26 +20,16 @@ import pytest
 
 from app.services.anti_habituation import Approach
 from app.voice.context import (
-    _SafeDict,
-    _build_evening_instruction,
-    _build_morning_instruction,
     _format_approach_guidance,
     _format_completed_tasks_section,
     _format_morning_outcome_section,
     _format_tasks_section,
     _format_yesterday_section,
     _safe_format_opener,
-    build_system_instruction,
+    _SafeDict,
     build_morning_context,
+    build_system_instruction,
 )
-
-
-# ---------------------------------------------------------------------------
-# Helpers to build test objects
-# ---------------------------------------------------------------------------
-
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -50,6 +45,7 @@ class _FakeCallLog:
     goal: str | None = None
     next_action: str | None = None
     call_outcome_confidence: str | None = None
+    commitments: list[str] | None = None
 
 
 def _make_task(title: str, priority: int = 50) -> _FakeTask:
@@ -61,12 +57,14 @@ def _make_call_log(
     goal: str | None = None,
     next_action: str | None = None,
     confidence: str | None = None,
+    commitments: list[str] | None = None,
 ) -> _FakeCallLog:
     """Create a CallLog-like object for testing without SQLAlchemy state."""
     return _FakeCallLog(
         goal=goal,
         next_action=next_action,
         call_outcome_confidence=confidence,
+        commitments=commitments,
     )
 
 
@@ -325,6 +323,21 @@ class TestBuildMorningInstruction:
         instruction = build_system_instruction("on_demand", self._make_ctx())
         assert "TestUser" in instruction
         assert "Phase 1" in instruction
+
+    def test_on_demand_includes_proactive_email_reason(self):
+        current_call = _make_call_log(
+            "Urgent email from Mina: Contract needs approval",
+            "Reply to Mina with approval or blockers",
+            commitments=["gmail_message_id:msg_123", "gmail_thread_id:thr_123"],
+        )
+        instruction = build_system_instruction(
+            "on_demand",
+            self._make_ctx(current_call=current_call),
+        )
+        assert "Proactive Call Reason" in instruction
+        assert "Urgent email from Mina" in instruction
+        assert "Reply to Mina" in instruction
+        assert "gmail_thread_id:thr_123" in instruction
 
     def test_contains_tool_bridge_rule(self):
         instruction = build_system_instruction("morning", self._make_ctx())

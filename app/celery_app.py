@@ -31,6 +31,7 @@ celery_app = Celery(
         "app.tasks.cleanup",
         "app.tasks.draft_review",
         "app.tasks.prefetch",
+        "app.tasks.email_automation",
     ],
 )
 
@@ -175,6 +176,11 @@ celery_app.conf.beat_schedule = {
     # Draft expiry: abandon non-terminal email drafts older than 2 hours.
     "draft-expiry": {
         "task": "app.tasks.cleanup.expire_stale_drafts",
+        "schedule": crontab(minute="*/15"),  # every 15 minutes
+    },
+    # Gmail automation: urgent-email proactive calls and auto-task capture.
+    "email-automation-sweep": {
+        "task": "app.tasks.email_automation.email_automation_sweep",
         "schedule": crontab(minute="*/15"),  # every 15 minutes
     },
     # Transcript cleanup: delete transcript artifacts older than 30 days

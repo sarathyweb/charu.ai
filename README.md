@@ -31,6 +31,7 @@ User ◄── Voice call ◄── Twilio Media Streams ◄── Pipecat + Gem
 - Goal capture during accountability calls
 - Google Calendar integration (today/range reads, event CRUD, available gaps, create time blocks)
 - Gmail integration (search/read, compose/send, archive, reviewed reply drafts, send approved replies)
+- Optional Gmail automation for urgent-email calls and auto-created email tasks
 - Web search through the ADK text agent
 - Authenticated website chat backed by the same ADK agent and phone identity
 - Post-call WhatsApp recaps and midday check-ins
@@ -263,6 +264,18 @@ AZURE_OPENAI_MODEL=gpt-5.4
 AZURE_OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 TASK_EMBEDDING_SIMILARITY_THRESHOLD=0.88
 TASK_EMBEDDING_BACKFILL_LIMIT=25
+
+# Optional Gmail automation. Users must also opt in from profile/settings.
+EMAIL_AUTOMATION_ENABLED=true
+URGENT_EMAIL_CALLS_ENABLED=true
+AUTO_TASK_FROM_EMAILS_ENABLED=true
+EMAIL_AUTOMATION_LOOKBACK_DAYS=2
+EMAIL_AUTOMATION_MAX_MESSAGES_PER_USER=10
+URGENT_EMAIL_CALL_DELAY_MINUTES=2
+URGENT_EMAIL_CALL_COOLDOWN_MINUTES=240
+URGENT_EMAIL_CALL_MAX_PER_DAY=1
+URGENT_EMAIL_MIN_SCORE=0.65
+AUTO_TASK_EMAIL_MIN_SCORE=0.7
 ```
 
 Generate secrets:

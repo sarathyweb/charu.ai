@@ -20,6 +20,10 @@ _ALLOWED_PREFERENCE_FIELDS: frozenset[str] = frozenset(
         "name",
         "timezone",
         "onboarding_complete",
+        "urgent_email_calls_enabled",
+        "auto_task_from_emails_enabled",
+        "email_automation_quiet_hours_start",
+        "email_automation_quiet_hours_end",
     }
 )
 

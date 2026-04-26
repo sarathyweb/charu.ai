@@ -66,6 +66,7 @@ async def _load_system_instruction_for_call(
             user_id=user_id,
             call_type=call_type,
             session=ctx_session,
+            call_log_id=call_log_id,
         )
 
 

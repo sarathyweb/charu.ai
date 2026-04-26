@@ -92,6 +92,10 @@ class GoalUpdateRequest(BaseModel):
 class UserProfileUpdateRequest(BaseModel):
     name: str | None = None
     timezone: str | None = None
+    urgent_email_calls_enabled: bool | None = None
+    auto_task_from_emails_enabled: bool | None = None
+    email_automation_quiet_hours_start: time | None = None
+    email_automation_quiet_hours_end: time | None = None
 
 
 class CallWindowRequest(BaseModel):
@@ -142,6 +146,25 @@ def _serialize_goal(goal: Goal) -> dict:
         "target_date": goal.target_date.isoformat() if goal.target_date else None,
         "completed_at": goal.completed_at.isoformat() if goal.completed_at else None,
         "created_at": goal.created_at.isoformat() if goal.created_at else None,
+    }
+
+
+def _serialize_user_profile(user: User) -> dict:
+    """Serialize dashboard-editable profile and automation preferences."""
+    return {
+        "name": user.name,
+        "phone": user.phone,
+        "timezone": user.timezone,
+        "onboarding_complete": user.onboarding_complete,
+        "urgent_email_calls_enabled": user.urgent_email_calls_enabled,
+        "auto_task_from_emails_enabled": user.auto_task_from_emails_enabled,
+        "email_automation_quiet_hours_start": (
+            user.email_automation_quiet_hours_start.strftime("%H:%M")
+        ),
+        "email_automation_quiet_hours_end": (
+            user.email_automation_quiet_hours_end.strftime("%H:%M")
+        ),
+        "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
 
@@ -766,13 +789,7 @@ async def get_user_profile(
     """Return user profile info."""
     user = await _resolve_user(principal, user_service)
 
-    return {
-        "name": user.name,
-        "phone": user.phone,
-        "timezone": user.timezone,
-        "onboarding_complete": user.onboarding_complete,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
-    }
+    return _serialize_user_profile(user)
 
 
 @router.patch("/api/user/profile")
@@ -782,10 +799,17 @@ async def update_user_profile(
     user_service: UserService = Depends(get_user_service),
 ):
     """Update dashboard-editable user profile and preferences."""
-    if request.name is None and request.timezone is None:
+    if (
+        request.name is None
+        and request.timezone is None
+        and request.urgent_email_calls_enabled is None
+        and request.auto_task_from_emails_enabled is None
+        and request.email_automation_quiet_hours_start is None
+        and request.email_automation_quiet_hours_end is None
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Provide at least one of name or timezone.",
+            detail="Provide at least one profile or automation preference.",
         )
 
     updates: dict[str, object] = {}
@@ -793,19 +817,27 @@ async def update_user_profile(
         updates["name"] = request.name.strip() or None
     if request.timezone is not None:
         updates["timezone"] = request.timezone
+    if request.urgent_email_calls_enabled is not None:
+        updates["urgent_email_calls_enabled"] = request.urgent_email_calls_enabled
+    if request.auto_task_from_emails_enabled is not None:
+        updates["auto_task_from_emails_enabled"] = (
+            request.auto_task_from_emails_enabled
+        )
+    if request.email_automation_quiet_hours_start is not None:
+        updates["email_automation_quiet_hours_start"] = (
+            request.email_automation_quiet_hours_start
+        )
+    if request.email_automation_quiet_hours_end is not None:
+        updates["email_automation_quiet_hours_end"] = (
+            request.email_automation_quiet_hours_end
+        )
 
     try:
         user = await user_service.update_preferences(principal.phone_number, **updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {
-        "name": user.name,
-        "phone": user.phone,
-        "timezone": user.timezone,
-        "onboarding_complete": user.onboarding_complete,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
-    }
+    return _serialize_user_profile(user)
 
 
 # ---------------------------------------------------------------------------

@@ -13,18 +13,18 @@
     {
       "id": "urgent_email_calls",
       "title": "Urgent-email proactive calls",
-      "status": "deferred_needs_spec",
+      "status": "implemented",
       "owner_area": "gmail_call_automation",
-      "decision": "Do not enable proactive calling from email classification without user preference, rate limits, and escalation rules.",
-      "next_step": "Specify urgency classifier, allowed hours, user controls, and call dedupe behavior."
+      "decision": "Implemented deterministic urgent scoring with user opt-in, local quiet hours, cooldown/max-per-day limits, Gmail thread dedupe, and on-demand CallLog scheduling.",
+      "next_step": "Collect production examples before replacing deterministic scoring with a model classifier."
     },
     {
       "id": "auto_task_from_emails",
       "title": "Auto-task creation from emails",
-      "status": "deferred_needs_spec",
+      "status": "implemented",
       "owner_area": "gmail_task_extraction",
-      "decision": "Keep manual Gmail-to-draft/task flows first; automatic task creation needs confidence thresholds and review UX.",
-      "next_step": "Define extraction confidence, task source labels, dedupe rules, and user confirmation policy."
+      "decision": "Implemented deterministic task scoring with user opt-in, ignored-sender filtering, Gmail thread dedupe, and TaskService creation with source=gmail.",
+      "next_step": "Review real task quality before adding model-based extraction or a user review queue."
     },
     {
       "id": "notion",

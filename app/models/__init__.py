@@ -3,11 +3,14 @@
 from app.models.call_log import CallLog
 from app.models.call_window import CallWindow
 from app.models.current_session import CurrentSession
+from app.models.email_automation_event import EmailAutomationEvent
 from app.models.email_draft_state import EmailDraftState
 from app.models.enums import (
     CallLogStatus,
     CallType,
     DraftStatus,
+    EmailAutomationEventType,
+    EmailAutomationStatus,
     GoalStatus,
     OccurrenceKind,
     OutboundMessageStatus,
@@ -41,6 +44,9 @@ __all__ = [
     "ChatResponse",
     "CurrentSession",
     "DraftStatus",
+    "EmailAutomationEvent",
+    "EmailAutomationEventType",
+    "EmailAutomationStatus",
     "EmailDraftState",
     "FirebasePrincipal",
     "Goal",

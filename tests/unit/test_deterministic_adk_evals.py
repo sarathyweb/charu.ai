@@ -205,6 +205,7 @@ def test_deferred_product_backlog_review_is_complete_and_actionable():
         assert item["status"] in {
             "deferred_needs_spec",
             "deferred_integration",
+            "implemented",
             "implemented_tone_only",
         }
         assert item["decision"]

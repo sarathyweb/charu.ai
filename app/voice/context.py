@@ -167,6 +167,7 @@ async def _fetch_tasks_completed_today(
 async def build_morning_context(
     user: User,
     session: AsyncSession,
+    current_call: CallLog | None = None,
 ) -> dict[str, Any]:
     """Gather all context needed for a morning/afternoon call.
 
@@ -256,6 +257,7 @@ async def build_morning_context(
         "two_week_variation": variation_text,
         "available_context": available_context,
         "is_weekend": _is_user_weekend(user),
+        "current_call": current_call,
     }
 
 
@@ -529,6 +531,23 @@ def _build_morning_instruction(
             "tasks, recovery, and one small satisfying action over work pressure.",
         ])
 
+    current_call = ctx.get("current_call")
+    if current_call and getattr(current_call, "goal", None):
+        parts.extend([
+            "",
+            "## Proactive Call Reason",
+            f"This call was scheduled because: {current_call.goal}",
+        ])
+        if current_call.next_action:
+            parts.append(f"Suggested next action: {current_call.next_action}")
+        if current_call.commitments:
+            parts.append("Reference metadata:")
+            parts.extend(f"- {item}" for item in current_call.commitments[:3])
+        parts.append(
+            "Open by briefly naming the urgent email context, then help the "
+            "user decide the response or next task."
+        )
+
     parts.extend([
         "",
         "## Call Flow",
@@ -779,6 +798,7 @@ async def prepare_call_context(
     user_id: int,
     call_type: str,
     session: AsyncSession,
+    call_log_id: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build the system instruction and context for a voice call.
 
@@ -804,10 +824,14 @@ async def prepare_call_context(
         from app.voice.pipeline import _default_instruction
         return _default_instruction(call_type), {}
 
+    current_call = None
+    if call_log_id is not None:
+        current_call = await session.get(CallLog, call_log_id)
+
     if call_type == "evening":
         ctx = await build_evening_context(user, session)
     else:
-        ctx = await build_morning_context(user, session)
+        ctx = await build_morning_context(user, session, current_call=current_call)
 
     instruction = build_system_instruction(call_type, ctx)
     logger.info(
