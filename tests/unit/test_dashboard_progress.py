@@ -26,6 +26,7 @@ from app.api.dashboard import (
     delete_goal,
     delete_task,
     get_call_history,
+    get_integrations,
     get_goals,
     get_progress,
     get_tasks,
@@ -35,6 +36,7 @@ from app.api.dashboard import (
     update_goal,
     update_task,
     update_user_profile,
+    disconnect_integration,
 )
 from app.models.call_log import CallLog
 from app.models.call_window import CallWindow
@@ -347,6 +349,16 @@ async def test_dashboard_goal_routes(session):
     )
     assert updated["goal"]["title"] == "Prepare beta launch"
 
+    cleared = await update_goal(
+        goal_id,
+        GoalUpdateRequest(description=None, target_date=None),
+        principal=principal,
+        user_service=user_service,
+        goal_service=goal_service,
+    )
+    assert cleared["goal"]["description"] is None
+    assert cleared["goal"]["target_date"] is None
+
     completed = await complete_goal(
         goal_id,
         principal=principal,
@@ -451,3 +463,55 @@ async def test_dashboard_profile_call_window_and_call_history_routes(session):
         session=session,
     )
     assert removed["status"] == "removed"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_integration_status_and_disconnect_revokes_when_last_scope(
+    session,
+    monkeypatch,
+):
+    user = await _create_user(session)
+    user.google_refresh_token_encrypted = "encrypted-refresh"
+    user.google_granted_scopes = "https://www.googleapis.com/auth/gmail.modify"
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    principal = FirebasePrincipal(uid=user.firebase_uid or "uid", phone_number=user.phone)
+    user_service = UserService(session)
+    revoked: list[int] = []
+
+    async def fake_revoke(revoke_user):
+        revoked.append(revoke_user.id)
+        return True
+
+    monkeypatch.setattr(dashboard, "_revoke_google_token_if_available", fake_revoke)
+
+    integrations = await get_integrations(
+        principal=principal,
+        user_service=user_service,
+    )
+    gmail = next(item for item in integrations["integrations"] if item["service"] == "gmail")
+    calendar = next(
+        item
+        for item in integrations["integrations"]
+        if item["service"] == "google_calendar"
+    )
+    assert gmail["connected"] is True
+    assert calendar["connected"] is False
+
+    disconnected = await disconnect_integration(
+        "gmail",
+        principal=principal,
+        user_service=user_service,
+        session=session,
+    )
+
+    assert disconnected == {
+        "status": "disconnected",
+        "service": "gmail",
+        "provider_revoked": True,
+    }
+    assert revoked == [user.id]
+    refreshed = await session.get(User, user.id)
+    assert refreshed.google_refresh_token_encrypted is None
+    assert refreshed.google_granted_scopes is None

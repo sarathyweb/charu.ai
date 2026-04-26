@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -13,10 +13,18 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CALL_CONTEXT_TTL_SECONDS = 15 * 60
+DEFAULT_CALL_CONTEXT_TTL_SECONDS = 30 * 60
 
 
-def _cache_key(call_log_id: int) -> str:
+def _scheduled_time_key(scheduled_time: datetime) -> str:
+    return scheduled_time.isoformat()
+
+
+def _cache_key(call_log_id: int, scheduled_time: datetime) -> str:
+    return f"voice_context:{call_log_id}:{_scheduled_time_key(scheduled_time)}"
+
+
+def _legacy_cache_key(call_log_id: int) -> str:
     return f"voice_context:{call_log_id}"
 
 
@@ -57,6 +65,7 @@ def _deserialize_call_ctx(ctx: dict[str, Any]) -> dict[str, Any]:
 
 async def store_call_context(
     call_log_id: int,
+    scheduled_time: datetime,
     system_instruction: str,
     call_ctx: dict[str, Any],
     *,
@@ -64,21 +73,29 @@ async def store_call_context(
 ) -> None:
     """Store a prebuilt voice system instruction and cleanup context."""
     payload = {
+        "scheduled_time": _scheduled_time_key(scheduled_time),
         "system_instruction": system_instruction,
         "call_ctx": _serialize_call_ctx(call_ctx),
     }
     r = await _get_redis()
     try:
-        await r.set(_cache_key(call_log_id), json.dumps(payload), ex=ttl_seconds)
+        await r.set(
+            _cache_key(call_log_id, scheduled_time),
+            json.dumps(payload),
+            ex=ttl_seconds,
+        )
     finally:
         await r.aclose()
 
 
-async def get_cached_call_context(call_log_id: int) -> tuple[str, dict[str, Any]] | None:
+async def get_cached_call_context(
+    call_log_id: int,
+    scheduled_time: datetime,
+) -> tuple[str, dict[str, Any]] | None:
     """Return cached voice context, or None on cache miss / invalid payload."""
     r = await _get_redis()
     try:
-        raw = await r.get(_cache_key(call_log_id))
+        raw = await r.get(_cache_key(call_log_id, scheduled_time))
     finally:
         await r.aclose()
 
@@ -87,10 +104,18 @@ async def get_cached_call_context(call_log_id: int) -> tuple[str, dict[str, Any]
 
     try:
         payload = json.loads(raw)
+        cached_scheduled_time = payload["scheduled_time"]
         instruction = payload["system_instruction"]
         call_ctx = payload["call_ctx"]
     except (KeyError, TypeError, json.JSONDecodeError):
         logger.warning("Ignoring invalid cached voice context for call_log_id=%d", call_log_id)
+        return None
+
+    if cached_scheduled_time != _scheduled_time_key(scheduled_time):
+        logger.warning(
+            "Ignoring stale cached voice context for call_log_id=%d",
+            call_log_id,
+        )
         return None
 
     if not isinstance(instruction, str) or not isinstance(call_ctx, dict):
@@ -100,10 +125,21 @@ async def get_cached_call_context(call_log_id: int) -> tuple[str, dict[str, Any]
     return instruction, _deserialize_call_ctx(call_ctx)
 
 
-async def delete_call_context(call_log_id: int) -> None:
+async def delete_call_context(
+    call_log_id: int,
+    scheduled_time: datetime | None = None,
+) -> None:
     """Delete cached voice context after a call finishes."""
     r = await _get_redis()
     try:
-        await r.delete(_cache_key(call_log_id))
+        keys: list[str] = [_legacy_cache_key(call_log_id)]
+        if scheduled_time is not None:
+            keys.append(_cache_key(call_log_id, scheduled_time))
+        else:
+            scan_iter = getattr(r, "scan_iter", None)
+            if scan_iter is not None:
+                async for key in scan_iter(match=f"voice_context:{call_log_id}:*"):
+                    keys.append(key)
+        await r.delete(*keys)
     finally:
         await r.aclose()

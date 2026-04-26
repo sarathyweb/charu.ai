@@ -120,6 +120,19 @@ class CallLogService:
         self.session.add(call_log)
         await self.session.commit()
         await self.session.refresh(call_log)
+        try:
+            from app.tasks.prefetch import enqueue_call_context_prefetch
+
+            await enqueue_call_context_prefetch(
+                call_log.id,  # type: ignore[arg-type]
+                call_log.scheduled_time,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to enqueue context prefetch for CallLog %s",
+                call_log.id,
+                exc_info=True,
+            )
         return call_log
 
     # ------------------------------------------------------------------
@@ -356,6 +369,26 @@ class CallLogService:
         call_log = await self.session.get(CallLog, call_log_id)
         if call_log is not None:
             await self.session.refresh(call_log)
+            try:
+                from app.config import get_settings
+                from app.services.call_context_cache import delete_call_context
+                from app.tasks.prefetch import enqueue_call_context_prefetch
+            except ImportError:
+                pass
+            else:
+                try:
+                    if get_settings().VOICE_CONTEXT_PREFETCH_ENABLED:
+                        await delete_call_context(call_log_id)
+                        await enqueue_call_context_prefetch(
+                            call_log.id,  # type: ignore[arg-type]
+                            call_log.scheduled_time,
+                        )
+                except Exception:
+                    logger.warning(
+                        "Failed to refresh context prefetch for CallLog %d",
+                        call_log_id,
+                        exc_info=True,
+                    )
 
         logger.info(
             "CallLog %d: rescheduled to %s (v%d → v%d)",

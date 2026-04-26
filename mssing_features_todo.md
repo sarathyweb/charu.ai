@@ -13,7 +13,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Reviewed frontend surface: `website`
 - [x] Reviewed test coverage under `tests`
 - [x] Used subagents for documentation/planning, agents/voice, backend services/API/tasks/models, and tests
-- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`, `.pm/research/80-calendar-gmail-full-tools-expansion.md`, `.pm/research/82-voice-full-tools-parity.md`, `.pm/research/83-dashboard-api-feature-closure.md`, `.pm/research/84-voice-reliability-feature-closure.md`, `.pm/research/88-pending-feature-closure-audit.md`, `.pm/research/89-hybrid-embedding-task-deduplication.md`, `.pm/research/90-email-automation-urgent-calls-auto-tasks.md`
+- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`, `.pm/research/80-calendar-gmail-full-tools-expansion.md`, `.pm/research/82-voice-full-tools-parity.md`, `.pm/research/83-dashboard-api-feature-closure.md`, `.pm/research/84-voice-reliability-feature-closure.md`, `.pm/research/88-pending-feature-closure-audit.md`, `.pm/research/89-hybrid-embedding-task-deduplication.md`, `.pm/research/90-email-automation-urgent-calls-auto-tasks.md`, `.pm/research/92-dashboard-backend-feature-readiness-audit.md`
 
 ## Implemented / Working Features
 
@@ -37,7 +37,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Pipecat/Gemini Live voice pipeline exists with transcript capture, call timer, tool registration, and cleanup hooks.
 - [x] Voice tools exist for saving morning/afternoon call outcomes, evening call outcomes, saving tasks, listing pending tasks, updating tasks, deleting tasks, snoozing tasks, unsnoozing tasks, completing tasks, creating/listing/updating/completing/abandoning/deleting goals, Calendar today/range reads, Calendar event CRUD, Calendar task time blocks, Gmail search/read/compose/archive/reply-draft flows, scheduling callbacks, skipping calls, rescheduling calls, getting the next call, and canceling today's calls.
 - [x] Structured call-outcome persistence exists for morning, afternoon, evening, and on-demand call types.
-- [x] Transcript storage and retention metadata exist.
+- [x] Transcript storage and retention cleanup exist; stale local transcript JSON files are deleted and DB references are cleared.
 - [x] Post-call cleanup exists for call state finalization, transcript persistence, fallback outcome persistence, recap dispatch, draft-review dispatch, and anti-habituation update.
 - [x] Post-call recaps exist for non-evening calls, including on-demand calls through the generic post-call recap path.
 - [x] Evening recap task exists.
@@ -52,9 +52,11 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Gmail write support exists for composing new emails, archiving messages, and draft-reviewed reply send flows with duplicate-send prevention.
 - [x] Gmail automation exists for opted-in urgent-email proactive calls and auto-task creation with thread dedupe, confidence gates, quiet hours, and rate limits.
 - [x] Website dashboard settings expose Gmail automation opt-ins and quiet-hour controls through the authenticated profile API.
+- [x] Website dashboard gates Gmail automation controls on Gmail connection status and offers a Gmail connect path when disconnected.
+- [x] Website dashboard exposes integration status/actions, task source labels, explicit goal field clearing, and full call recap fields.
 - [x] Dashboard API exists for summary metrics, tasks, schedule, profile, progress history, and integrations.
 - [x] Website app exists under `website`, with dashboard, authenticated chat, login/onboarding entry, and integrations pages.
-- [x] Backend test suite is broad and currently passes with `839 passed, 1 skipped, 73 warnings`.
+- [x] Backend test suite is broad and currently passes with `846 passed, 1 skipped, 73 warnings`.
 
 ## Partial / Needs Verification
 
@@ -98,7 +100,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Add voice Google Search/web-search support if voice is expected to match chat search behavior.
 - [x] Add voice call-window CRUD tools for recurring call schedule management.
 - [x] Run and enforce ADK/voice tool parity checks so promised tools are registered in every intended channel.
-- [x] Implement voice call-context prefetch with Redis/Celery so pickup does not depend only on live database/context assembly.
+- [x] Implement voice call-context prefetch with Redis/Celery so pickup does not depend only on live database/context assembly; cache keys include `call_log_id` plus `scheduled_time`, stale prefetches are skipped, and entries expire after 30 minutes.
 - [x] Harden Google API cancellation/thread behavior with bounded concurrency and per-attempt timeout handling.
 - [x] Added `GOOGLE_CLOUD_LIVE_LOCATION` to `.env.example`.
 - [x] Implement `app/tasks/draft_review.py` and wire draft-review WhatsApp notification dispatch as a real task.
@@ -118,7 +120,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Implement hybrid embedding-based task deduplication beyond pg_trgm/fuzzy matching with Azure OpenAI `text-embedding-3-large`, env-driven credentials, configurable threshold/backfill limits, JSONB task embeddings, and safe fallback when embeddings are unavailable.
 - [x] Add weekend mode as tone-only local-weekend voice guidance.
 - [x] Implement urgent-email proactive call behavior with deterministic escalation scoring, opt-in, quiet hours, rate limits, and thread dedupe.
-- [x] Implement auto-task creation from emails with deterministic extraction confidence, ignored senders, and message/thread tracking.
+- [x] Implement auto-task creation from emails with deterministic extraction confidence, automated/no-reply sender filtering, and message/thread tracking.
 - [x] Defer Notion integration because it is not in active scope; current docs describe it as deferred until OAuth/workspace mapping is specified.
 - [x] Defer Google Keep integration because it is not in active scope; current docs describe it as deferred until API viability and mapping are specified.
 - [x] Defer Google Tasks/Todoist import because it is not in active scope; current implementation evidence was not found and import semantics need specs.
@@ -126,8 +128,8 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 
 ## Test Coverage TODO
 
-- [x] Ran backend verification: `uv run pytest -q` passed with `839 passed, 1 skipped, 73 warnings`.
-- [x] Ran frontend verification: `npm run test`, `npm run lint`, and `npm run build` passed for the website app.
+- [x] Ran backend verification: `PYTHONDONTWRITEBYTECODE=1 uv run pytest -q -p no:cacheprovider` passed with `846 passed, 1 skipped, 73 warnings`.
+- [x] Ran frontend verification: `npm test`, `npm run lint`, and `npm run build` passed for the website app (`13 passed` across 4 Vitest files).
 - [x] Add ADK eval datasets for core scenarios: onboarding completion, task capture, task completion, calendar scheduling, Gmail reply, call management, and refusal/error handling.
 - [x] Add tests that assert task-tool registration and required ADK schemas for update/delete/snooze/unsnooze/list-pending parity.
 - [x] Add tests that assert voice task-tool registration and callback payloads for update/delete/snooze/unsnooze/list-pending parity.

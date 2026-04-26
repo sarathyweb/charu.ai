@@ -45,9 +45,21 @@ class GoalService:
         new_title: str | None = None,
         new_description: str | None = None,
         new_target_date: date | None = None,
+        update_fields: set[str] | None = None,
     ) -> Goal | None:
         """Update fields on a goal owned by *user_id*."""
-        if new_title is None and new_description is None and new_target_date is None:
+        if update_fields is None:
+            update_fields = {
+                field
+                for field, value in (
+                    ("title", new_title),
+                    ("description", new_description),
+                    ("target_date", new_target_date),
+                )
+                if value is not None
+            }
+
+        if not update_fields:
             raise ValueError(
                 "At least one of new_title, new_description, or new_target_date "
                 "must be provided."
@@ -57,11 +69,13 @@ class GoalService:
         if goal is None:
             return None
 
-        if new_title is not None:
+        if "title" in update_fields:
+            if new_title is None:
+                raise ValueError("title cannot be empty.")
             goal.title = self._clean_title(new_title)
-        if new_description is not None:
+        if "description" in update_fields:
             goal.description = self._clean_optional_text(new_description)
-        if new_target_date is not None:
+        if "target_date" in update_fields:
             goal.target_date = new_target_date
 
         self.session.add(goal)

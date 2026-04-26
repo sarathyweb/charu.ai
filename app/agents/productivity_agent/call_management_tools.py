@@ -38,7 +38,7 @@ async def schedule_callback(
 
     Args:
         minutes_from_now: How many minutes from now to place the call.
-            Must be between 1 and 120.
+            Use 0 for "call me now"; otherwise choose 1 through 120.
     """
     phone = tool_context.state.get("phone")
     if not phone:

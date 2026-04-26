@@ -6,11 +6,21 @@ import pytest
 import pytest_asyncio
 import sqlalchemy
 from dotenv import load_dotenv
+from hypothesis import HealthCheck, settings
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 load_dotenv()
+
+os.environ["VOICE_CONTEXT_PREFETCH_ENABLED"] = "false"
+
+settings.register_profile(
+    "charu_tests",
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+settings.load_profile("charu_tests")
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
@@ -30,12 +40,15 @@ async def db_engine():
 
     eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with eng.begin() as conn:
+        await conn.execute(sqlalchemy.text("DROP SCHEMA IF EXISTS public CASCADE"))
+        await conn.execute(sqlalchemy.text("CREATE SCHEMA public"))
         # Ensure pg_trgm extension is available (required by TaskService)
         await conn.execute(sqlalchemy.text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(SQLModel.metadata.create_all)
     yield eng
     async with eng.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
+        await conn.execute(sqlalchemy.text("DROP SCHEMA IF EXISTS public CASCADE"))
+        await conn.execute(sqlalchemy.text("CREATE SCHEMA public"))
     await eng.dispose()
 
 

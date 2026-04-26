@@ -206,6 +206,10 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: CRO guidance from Codemigo and external landing-page copywriting references emphasizes fast value-proposition clarity, consistent CTAs, skimmable headings, proof, and removing hesitation before asking for action.
   Source: `.pm/research/91-landing-page-cro-copywriting.md`
 
+- 2026-04-26: Feature completion checks must include backend behavior, dashboard exposure, and deterministic tests before docs can mark an item complete.
+  Rationale: the latest audit found working backend endpoints that were under-exposed in the dashboard and a stale full-suite pass claim. Completion now requires explicit UI/API wiring tests, honest verification counts, and no docs overclaims.
+  Source: `.pm/research/92-dashboard-backend-feature-readiness-audit.md`
+
 ## Tech Stack
 
 - Python 3.10+

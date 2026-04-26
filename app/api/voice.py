@@ -54,14 +54,19 @@ async def _load_system_instruction_for_call(
     call_type: str,
 ) -> tuple[str, dict]:
     """Load prebuilt voice context from Redis, falling back to live assembly."""
-    cached = await get_cached_call_context(call_log_id)
-    if cached is not None:
-        logger.info("voice/stream: using cached context for call_log_id=%d", call_log_id)
-        return cached
-
-    from app.voice.context import prepare_call_context
-
     async with async_session_factory() as ctx_session:
+        call_log = await ctx_session.get(CallLog, call_log_id)
+        if call_log is not None:
+            cached = await get_cached_call_context(call_log_id, call_log.scheduled_time)
+            if cached is not None:
+                logger.info(
+                    "voice/stream: using cached context for call_log_id=%d",
+                    call_log_id,
+                )
+                return cached
+
+        from app.voice.context import prepare_call_context
+
         return await prepare_call_context(
             user_id=user_id,
             call_type=call_type,
@@ -279,6 +284,20 @@ async def _handle_early_disconnect_retry(
             )
             session.add(retry_log)
             await session.commit()
+            try:
+                from app.tasks.prefetch import enqueue_call_context_prefetch
+
+                await enqueue_call_context_prefetch(
+                    retry_log.id,  # type: ignore[arg-type]
+                    retry_log.scheduled_time,
+                )
+            except Exception:
+                logger.warning(
+                    "voice/stream: failed to enqueue retry context prefetch "
+                    "for call_log_id=%s",
+                    retry_log.id,
+                    exc_info=True,
+                )
 
             logger.info(
                 "voice/stream: scheduled retry for call_log_id=%d → "
@@ -750,6 +769,20 @@ async def _handle_missed_call_retry(
         session.add(retry_log)
         await session.commit()
         await session.refresh(retry_log)
+        try:
+            from app.tasks.prefetch import enqueue_call_context_prefetch
+
+            await enqueue_call_context_prefetch(
+                retry_log.id,  # type: ignore[arg-type]
+                retry_log.scheduled_time,
+            )
+        except Exception:
+            logger.warning(
+                "voice/status-callback: failed to enqueue retry context prefetch "
+                "for call_log_id=%s",
+                retry_log.id,
+                exc_info=True,
+            )
 
         logger.info(
             "voice/status-callback: scheduled retry call_log_id=%d → "

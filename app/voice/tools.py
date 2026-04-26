@@ -1478,7 +1478,7 @@ def register_voice_tools(
 
         Args:
             minutes_from_now: Number of minutes until the callback.
-                Must be between 1 and 120.
+                Use 0 for "call me now"; otherwise choose 1 through 120.
         """
         try:
             async with async_session_factory() as session:

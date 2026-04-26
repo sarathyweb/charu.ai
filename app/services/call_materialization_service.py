@@ -91,6 +91,19 @@ async def rematerialize_future_calls(
                 async with session.begin_nested():
                     session.add(call_log)
                     await session.flush()
+                try:
+                    from app.tasks.prefetch import record_call_context_prefetch
+
+                    record_call_context_prefetch(session, call_log)
+                except Exception:
+                    logger.warning(
+                        "Failed to record context prefetch for rematerialized call "
+                        "user_id=%d type=%s date=%s",
+                        user.id,
+                        window.window_type,
+                        target_date,
+                        exc_info=True,
+                    )
                 created += 1
             except IntegrityError:
                 logger.debug(

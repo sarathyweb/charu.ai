@@ -145,10 +145,10 @@ class CallManagementService:
           current in-progress call to ``deferred``, then creates a new
           on-demand CallLog with ``replaced_call_log_id`` pointing to it.
         """
-        if minutes_from_now < 1 or minutes_from_now > 120:
+        if minutes_from_now < 0 or minutes_from_now > 120:
             return CallManagementResult(
                 success=False,
-                message="Please choose between 1 and 120 minutes.",
+                message="Please choose between 0 and 120 minutes.",
             )
 
         user = await self.session.get(User, user_id)
@@ -249,9 +249,16 @@ class CallManagementService:
         created = await self.cls.create_call_log(new_log)
 
         local_time_str = eta.astimezone(tz).strftime("%I:%M %p")
+        if minutes_from_now == 0:
+            message = f"I'll call you now (scheduled for {local_time_str})."
+        else:
+            message = (
+                f"I'll call you in {minutes_from_now} minutes "
+                f"(at {local_time_str})."
+            )
         return CallManagementResult(
             success=True,
-            message=f"I'll call you in {minutes_from_now} minutes (at {local_time_str}).",
+            message=message,
             call_log_id=created.id,
         )
 

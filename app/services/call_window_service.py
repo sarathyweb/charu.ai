@@ -89,6 +89,7 @@ class CallWindowService:
                 await self._rematerialize_if_ready(user, window_type)
 
             await self.session.commit()
+            await self._enqueue_recorded_prefetches()
             await self.session.refresh(existing)
             return existing
 
@@ -104,6 +105,7 @@ class CallWindowService:
         await self.session.flush()
         await self._rematerialize_if_ready(user, window_type)
         await self.session.commit()
+        await self._enqueue_recorded_prefetches()
         await self.session.refresh(window)
         return window
 
@@ -169,6 +171,7 @@ class CallWindowService:
             await self._rematerialize_if_ready(user, window.window_type)
 
         await self.session.commit()
+        await self._enqueue_recorded_prefetches()
         await self.session.refresh(window)
         return window
 
@@ -274,3 +277,14 @@ class CallWindowService:
                 window_type,
             )
             raise
+
+    async def _enqueue_recorded_prefetches(self) -> None:
+        try:
+            from app.tasks.prefetch import enqueue_recorded_call_context_prefetches
+
+            await enqueue_recorded_call_context_prefetches(self.session)
+        except Exception:
+            logger.warning(
+                "Failed to enqueue rematerialized call context prefetches",
+                exc_info=True,
+            )

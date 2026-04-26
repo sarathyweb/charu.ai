@@ -77,6 +77,28 @@ class TestUpdateGoal:
         assert updated.target_date == date(2026, 5, 20)
 
     @pytest.mark.asyncio
+    async def test_explicit_update_fields_can_clear_optional_fields(self, session, svc):
+        user = await _create_user(session)
+        goal = await svc.create_goal(
+            user.id,
+            "Finish tax filing",
+            description="Collect forms",
+            target_date=date(2026, 5, 20),
+        )
+
+        updated = await svc.update_goal(
+            goal.id,
+            user.id,
+            new_description=None,
+            new_target_date=None,
+            update_fields={"description", "target_date"},
+        )
+
+        assert updated is not None
+        assert updated.description is None
+        assert updated.target_date is None
+
+    @pytest.mark.asyncio
     async def test_rejects_empty_update(self, session, svc):
         user = await _create_user(session)
         goal = await svc.create_goal(user.id, "Finish tax filing")

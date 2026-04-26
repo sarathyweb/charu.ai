@@ -123,6 +123,19 @@ async def _materialize_call(
         )
         return False
 
+    try:
+        from app.tasks.prefetch import record_call_context_prefetch
+
+        record_call_context_prefetch(session, call_log)
+    except Exception:
+        logger.warning(
+            "Failed to record context prefetch for planned call user_id=%s type=%s date=%s",
+            user.id,
+            window.window_type,
+            target_date,
+            exc_info=True,
+        )
+
     return True
 
 
@@ -188,6 +201,15 @@ async def _run_daily_planner() -> dict[str, int]:
 
         # Commit all new rows in one batch
         await session.commit()
+        try:
+            from app.tasks.prefetch import enqueue_recorded_call_context_prefetches
+
+            await enqueue_recorded_call_context_prefetches(session)
+        except Exception:
+            logger.warning(
+                "daily_planner: context prefetch enqueue failed",
+                exc_info=True,
+            )
 
     logger.info(
         "daily_planner: processed %d users, created %d calls, skipped %d duplicates",
@@ -252,6 +274,15 @@ async def _run_catchup_sweep() -> dict[str, int]:
             users_processed += 1
 
         await session.commit()
+        try:
+            from app.tasks.prefetch import enqueue_recorded_call_context_prefetches
+
+            await enqueue_recorded_call_context_prefetches(session)
+        except Exception:
+            logger.warning(
+                "planner_catchup_sweep: context prefetch enqueue failed",
+                exc_info=True,
+            )
 
     logger.info(
         "planner_catchup_sweep: processed %d users, created %d calls, skipped %d duplicates",

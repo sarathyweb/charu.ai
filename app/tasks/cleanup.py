@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlalchemy import update
-from sqlmodel import col, delete
+from sqlmodel import col, delete, select
 
 from app.celery_app import celery_app, run_async
 from app.db import async_session_factory
@@ -44,6 +45,19 @@ _NON_TERMINAL_DRAFT_STATUSES = (
     DraftStatus.REVISION_REQUESTED.value,
     DraftStatus.APPROVED.value,
 )
+
+
+def _delete_transcript_file(filename: str) -> bool:
+    """Delete a locally stored transcript JSON file if it exists."""
+    from app.voice.cleanup import TRANSCRIPT_DIR
+
+    path = Path(TRANSCRIPT_DIR) / Path(filename).name
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        logger.warning("Failed to delete transcript file %s", path, exc_info=True)
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -91,15 +105,23 @@ async def _run_cleanup_old_transcripts() -> str:
     """Delete transcript artifacts older than 30 days.
 
     Sets ``CallLog.transcript_filename = None`` on affected rows to
-    prevent dangling references.  The actual artifact files (stored via
-    ADK ArtifactService) are not deleted here — that requires the
-    ArtifactService API which is not available in the Celery worker
-    context.  Nulling the filename is the critical step; orphaned
-    artifact blobs can be garbage-collected separately.
+    prevent dangling references. Local transcript JSON files are deleted
+    before the DB reference is cleared.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=TRANSCRIPT_RETENTION_DAYS)
 
     async with async_session_factory() as session:
+        rows_result = await session.exec(
+            select(CallLog.id, CallLog.transcript_filename).where(
+                col(CallLog.transcript_filename).isnot(None),
+                CallLog.created_at <= cutoff,
+            )
+        )
+        rows = list(rows_result.all())
+        for _, filename in rows:
+            if filename:
+                _delete_transcript_file(filename)
+
         stmt = (
             update(CallLog)
             .where(

@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     # Redis URL for Celery broker and RedBeat scheduler
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # Voice context prefetch dispatch. Production keeps this on; tests disable
+    # broker publishes explicitly in tests/conftest.py.
+    VOICE_CONTEXT_PREFETCH_ENABLED: bool = True
+
     # Comma-separated allowed CORS origins (e.g. "https://app.example.com,http://localhost:3000")
     CORS_ORIGINS: str
 

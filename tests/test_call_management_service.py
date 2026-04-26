@@ -130,11 +130,24 @@ class TestScheduleCallbackStandalone:
     async def test_rejects_invalid_minutes(self, session, svc):
         user = await _create_user(session, "+15552000002")
 
-        r1 = await svc.schedule_callback(user.id, 0)
+        r1 = await svc.schedule_callback(user.id, -1)
         assert r1.success is False
 
         r2 = await svc.schedule_callback(user.id, 121)
         assert r2.success is False
+
+    @pytest.mark.asyncio
+    async def test_call_me_now_creates_immediate_on_demand(self, session, svc):
+        user = await _create_user(session, "+15552000020")
+
+        result = await svc.schedule_callback(user.id, 0)
+
+        assert result.success is True
+        assert "now" in result.message.lower()
+        log = await session.get(CallLog, result.call_log_id)
+        assert log is not None
+        assert log.call_type == CallType.ON_DEMAND.value
+        assert log.scheduled_time <= datetime.now(timezone.utc) + timedelta(seconds=5)
 
     @pytest.mark.asyncio
     async def test_replaces_existing_on_demand(self, session, svc, cls):

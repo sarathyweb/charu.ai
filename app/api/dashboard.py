@@ -11,8 +11,12 @@ DELETE /api/integrations/{service}/disconnect — revoke OAuth for a service
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, time, timedelta, timezone
+from urllib.parse import urlencode
+from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -40,6 +44,7 @@ from app.models.user import User
 from app.services.call_window_service import CallWindowService
 from app.services.ephemeral_token_service import create_ephemeral_token
 from app.services.goal_service import GoalService
+from app.services.google_oauth_service import decrypt_token
 from app.services.task_service import TaskService
 from app.services.user_service import UserService
 
@@ -66,6 +71,7 @@ GOAL_SUCCESS_CONFIDENCES = (
     OutcomeConfidence.CLEAR.value,
     OutcomeConfidence.PARTIAL.value,
 )
+GOOGLE_TOKEN_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
 
 class TaskUpdateRequest(BaseModel):
@@ -235,12 +241,63 @@ async def _rematerialize_call_window(
             window_type_filter=window_type,
         )
         await session.commit()
+        try:
+            from app.tasks.prefetch import enqueue_recorded_call_context_prefetches
+
+            await enqueue_recorded_call_context_prefetches(session)
+        except Exception:
+            logger.warning(
+                "Dashboard call-window prefetch enqueue failed for user_id=%s type=%s",
+                user.id,
+                window_type,
+                exc_info=True,
+            )
     except Exception:
         logger.exception(
             "Dashboard call-window rematerialization failed for user_id=%s type=%s",
             user.id,
             window_type,
         )
+
+
+def _post_google_token_revoke(token: str) -> None:
+    body = urlencode({"token": token}).encode("utf-8")
+    request = UrlRequest(
+        GOOGLE_TOKEN_REVOKE_URL,
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urlopen(request, timeout=5) as response:  # noqa: S310 - fixed Google URL
+        response.read()
+
+
+async def _revoke_google_token_if_available(user: User) -> bool:
+    """Best-effort provider-side revocation before clearing local tokens."""
+    encrypted = user.google_refresh_token_encrypted or user.google_access_token_encrypted
+    if not encrypted:
+        return False
+
+    try:
+        token = decrypt_token(encrypted)
+    except Exception:
+        logger.warning(
+            "Could not decrypt Google OAuth token for provider revocation user_id=%s",
+            user.id,
+            exc_info=True,
+        )
+        return False
+
+    try:
+        await asyncio.to_thread(_post_google_token_revoke, token)
+    except Exception:
+        logger.warning(
+            "Google OAuth provider token revocation failed for user_id=%s",
+            user.id,
+            exc_info=True,
+        )
+        return False
+    return True
 
 
 def _today_for_user(user: User) -> date:
@@ -899,6 +956,7 @@ async def update_goal(
             new_title=request.title,
             new_description=request.description,
             new_target_date=request.target_date,
+            update_fields=set(request.model_fields_set),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1066,7 +1124,7 @@ async def disconnect_integration(
     user_service: UserService = Depends(get_user_service),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Revoke OAuth tokens for a specific service."""
+    """Disconnect a Google service and revoke provider tokens when no scopes remain."""
     user = await _resolve_user(principal, user_service)
 
     if service not in ("google_calendar", "gmail"):
@@ -1084,8 +1142,11 @@ async def disconnect_integration(
     remaining = granted - scopes_to_remove
     user.google_granted_scopes = " ".join(sorted(remaining)) if remaining else None
 
-    # If no scopes remain, clear all OAuth tokens
+    provider_revoked = False
+
+    # If no scopes remain, revoke and clear all OAuth tokens
     if not remaining:
+        provider_revoked = await _revoke_google_token_if_available(user)
         user.google_access_token_encrypted = None
         user.google_refresh_token_encrypted = None
         user.google_token_expiry = None
@@ -1099,4 +1160,8 @@ async def disconnect_integration(
         user.id,
         remaining or "none",
     )
-    return {"status": "disconnected", "service": service}
+    return {
+        "status": "disconnected",
+        "service": service,
+        "provider_revoked": provider_revoked,
+    }

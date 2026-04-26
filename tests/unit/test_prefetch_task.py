@@ -61,7 +61,12 @@ async def test_prefetch_builds_and_stores_context(session, monkeypatch):
 
     assert result == f"Prefetched context for CallLog {call.id}"
     prepare.assert_awaited_once()
-    store.assert_awaited_once_with(call.id, "instruction", {"opener": {"id": "a"}})
+    store.assert_awaited_once_with(
+        call.id,
+        call.scheduled_time,
+        "instruction",
+        {"opener": {"id": "a"}},
+    )
 
 
 @pytest.mark.asyncio
@@ -78,3 +83,56 @@ async def test_prefetch_skips_terminal_call(session, monkeypatch):
     assert "skipping context prefetch" in result
     prepare.assert_not_awaited()
     store.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prefetch_skips_stale_scheduled_time(session, monkeypatch):
+    _, call = await _user_and_call(session)
+    prepare = AsyncMock()
+    store = AsyncMock()
+    monkeypatch.setattr(prefetch, "async_session_factory", SessionFactory(session))
+    monkeypatch.setattr(prefetch, "prepare_call_context", prepare)
+    monkeypatch.setattr(prefetch, "store_call_context", store)
+
+    result = await prefetch._run_prefetch_call_context(
+        call.id,
+        "2026-04-26T12:00:00+00:00",
+    )
+
+    assert "scheduled_time changed" in result
+    prepare.assert_not_awaited()
+    store.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_prefetch_uses_eta_for_future_call(monkeypatch):
+    calls = []
+
+    class Task:
+        async def apply_asyncx(self, **kwargs):
+            calls.append(kwargs)
+            return type("Result", (), {"id": "prefetch-task-id"})()
+
+    monkeypatch.setattr(
+        prefetch,
+        "get_settings",
+        lambda: type("Settings", (), {"VOICE_CONTEXT_PREFETCH_ENABLED": True})(),
+    )
+    monkeypatch.setattr(prefetch, "prefetch_call_context", Task())
+
+    now = datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc)
+    scheduled = datetime(2026, 4, 26, 12, 10, tzinfo=timezone.utc)
+
+    task_id = await prefetch.enqueue_call_context_prefetch(99, scheduled, now=now)
+
+    assert task_id == "prefetch-task-id"
+    assert calls == [
+        {
+            "kwargs": {
+                "call_log_id": 99,
+                "scheduled_time": scheduled.isoformat(),
+            },
+            "retry": False,
+            "eta": datetime(2026, 4, 26, 12, 5, tzinfo=timezone.utc),
+        }
+    ]

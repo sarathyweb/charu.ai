@@ -57,9 +57,9 @@ _non_terminal_non_inprogress = st.sampled_from([
     CallLogStatus.RINGING,
 ])
 
-_valid_minutes = st.integers(min_value=1, max_value=120)
+_valid_minutes = st.integers(min_value=0, max_value=120)
 _invalid_minutes = st.one_of(
-    st.integers(min_value=-100, max_value=0),
+    st.integers(min_value=-100, max_value=-1),
     st.integers(min_value=121, max_value=500),
 )
 
@@ -366,7 +366,7 @@ async def test_schedule_callback_rejects_invalid_minutes(
     minutes: int,
     session: AsyncSession,
 ):
-    """schedule_callback with minutes outside [1, 120] returns failure."""
+    """schedule_callback with minutes outside [0, 120] returns failure."""
     svc = CallManagementService(session, twilio_client=None)
     user = await _create_user(session)
 

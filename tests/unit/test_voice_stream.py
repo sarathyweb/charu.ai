@@ -319,26 +319,42 @@ class TestVoiceStreamContextLoading:
     async def test_load_system_instruction_uses_cache(self):
         from app.api.voice import _load_system_instruction_for_call
 
+        scheduled_time = datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc)
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(
+            return_value=SimpleNamespace(scheduled_time=scheduled_time)
+        )
         with (
             patch(
                 "app.api.voice.get_cached_call_context",
                 AsyncMock(return_value=("cached instruction", {"opener": {"id": "x"}})),
             ) as cached,
+            patch("app.api.voice.async_session_factory") as mock_factory,
             patch("app.voice.context.prepare_call_context", new_callable=AsyncMock) as prepare,
         ):
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
             result = await _load_system_instruction_for_call(1, 42, "morning")
 
         assert result == ("cached instruction", {"opener": {"id": "x"}})
-        cached.assert_awaited_once_with(1)
+        cached.assert_awaited_once_with(1, scheduled_time)
         prepare.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_load_system_instruction_falls_back_to_live_context(self):
         from app.api.voice import _load_system_instruction_for_call
 
+        scheduled_time = datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc)
         mock_session = AsyncMock()
+        mock_session.get = AsyncMock(
+            return_value=SimpleNamespace(scheduled_time=scheduled_time)
+        )
         with (
-            patch("app.api.voice.get_cached_call_context", AsyncMock(return_value=None)),
+            patch(
+                "app.api.voice.get_cached_call_context",
+                AsyncMock(return_value=None),
+            ) as cached,
             patch("app.api.voice.async_session_factory") as mock_factory,
             patch(
                 "app.voice.context.prepare_call_context",
@@ -351,6 +367,7 @@ class TestVoiceStreamContextLoading:
             result = await _load_system_instruction_for_call(1, 42, "morning")
 
         assert result == ("live instruction", {"approach": "task_led"})
+        cached.assert_awaited_once_with(1, scheduled_time)
         prepare.assert_awaited_once_with(
             user_id=42,
             call_type="morning",

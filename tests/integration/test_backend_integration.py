@@ -128,6 +128,13 @@ class TestRouterWiring:
         assert "/api/auth/sync" in route_paths
         assert "/api/chat" in route_paths
         assert "/webhook/whatsapp" in route_paths
+        assert "/api/progress" in route_paths
+        assert "/api/tasks" in route_paths
+        assert "/api/goals" in route_paths
+        assert "/api/call-history" in route_paths
+        assert "/api/user/profile" in route_paths
+        assert "/api/call-windows" in route_paths
+        assert "/api/integrations" in route_paths
 
 
 # ---------------------------------------------------------------------------
