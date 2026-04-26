@@ -202,6 +202,10 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: proactive calls and automatic task creation are user-trust sensitive. Rule-based scoring, ignored-sender filters, thread dedupe, quiet hours, and rate limits give a predictable baseline that can be tested before any model-based classifier is introduced.
   Source: `.pm/research/90-email-automation-urgent-calls-auto-tasks.md`
 
+- 2026-04-26: The marketing landing page uses one primary WhatsApp conversion path, benefit-first copy, product-context proof, and objection handling before the final CTA.
+  Rationale: CRO guidance from Codemigo and external landing-page copywriting references emphasizes fast value-proposition clarity, consistent CTAs, skimmable headings, proof, and removing hesitation before asking for action.
+  Source: `.pm/research/91-landing-page-cro-copywriting.md`
+
 ## Tech Stack
 
 - Python 3.10+
