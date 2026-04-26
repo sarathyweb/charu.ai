@@ -1,6 +1,7 @@
 # Missing Features TODO / AI Feature Audit
 
 Generated: 2026-04-25
+Last updated: 2026-04-26
 
 This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, and multiple subagent reviews. Checked items are implemented in the codebase. Unchecked items are partial, missing, or need verification before they should be treated as production-complete.
 
@@ -12,7 +13,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Reviewed frontend surface: `website`
 - [x] Reviewed test coverage under `tests`
 - [x] Used subagents for documentation/planning, agents/voice, backend services/API/tasks/models, and tests
-- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`, `.pm/research/80-calendar-gmail-full-tools-expansion.md`, `.pm/research/82-voice-full-tools-parity.md`, `.pm/research/83-dashboard-api-feature-closure.md`, `.pm/research/84-voice-reliability-feature-closure.md`
+- [x] Wrote supporting research: `.pm/research/76-ai-feature-audit-report.md`, `.pm/research/78-task-tool-parity-implementation.md`, `.pm/research/79-goal-model-service-tools-implementation.md`, `.pm/research/80-calendar-gmail-full-tools-expansion.md`, `.pm/research/82-voice-full-tools-parity.md`, `.pm/research/83-dashboard-api-feature-closure.md`, `.pm/research/84-voice-reliability-feature-closure.md`, `.pm/research/88-pending-feature-closure-audit.md`
 
 ## Implemented / Working Features
 
@@ -50,19 +51,19 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Gmail read support exists for emails needing reply, searching inbox, reading the top query match, and fetching a selected email for reply.
 - [x] Gmail write support exists for composing new emails, archiving messages, and draft-reviewed reply send flows with duplicate-send prevention.
 - [x] Dashboard API exists for summary metrics, tasks, schedule, profile, progress history, and integrations.
-- [x] Website dashboard exists under `website`, with dashboard, login, onboarding, and integrations pages.
-- [x] Backend test suite is broad and currently passes with `817 passed, 1 skipped, 73 warnings`.
+- [x] Website app exists under `website`, with dashboard, authenticated chat, login/onboarding entry, and integrations pages.
+- [x] Backend test suite is broad and currently passes with `825 passed, 1 skipped, 73 warnings`.
 
 ## Partial / Needs Verification
 
 - [x] Add deterministic ADK evals for root-agent routing, sub-agent handoff, tool selection, and tool argument quality.
-- [ ] Add true conversation-level tests for onboarding; current coverage is stronger around services/tools than complete ADK flow.
-- [ ] Add voice pipeline integration tests that exercise frames, Gemini Live behavior, barge-in/interruption, tool calls, and cleanup together.
+- [x] Add deterministic conversation-level onboarding contract tests; `tests/unit/test_onboarding_conversation_contract.py` verifies one-step progression and strict completion prerequisites.
+- [x] Add voice pipeline integration tests that exercise Twilio start frames, pipeline assembly, transcript handoff, cleanup dispatch, and cache cleanup with mocked Gemini Live boundaries.
 - [x] Guarantee voice outcome persistence when the LLM does not call the expected save-outcome tool before disconnect; cleanup now persists explicit `none` confidence instead of leaving null outcomes.
-- [ ] Decide whether onboarding must force all three call windows and both Google integrations, or add explicit skip/decline paths.
+- [x] Decide whether onboarding must force all three call windows and both Google integrations, or add explicit skip/decline paths. Current decision: keep strict setup for production; skip/decline paths need a separate product spec because they change scheduling and tool-availability guarantees.
 - [x] Fixed dashboard Google integration connect flow so the frontend uses Bearer auth and receives an OAuth URL before navigating.
 - [x] Reconciled `README.md` claims with actual implemented tool scope.
-- [ ] Add frontend tests for the `website` app; no first-party frontend tests were found.
+- [x] Add frontend tests for the `website` app; Vitest/React Testing Library now covers dashboard, chat, login/onboarding entry, and integrations behavior.
 - [x] Verify production runtime dependencies end to end via `/health/ready` readiness checks for DB, Redis, Celery worker, required environment variables, Firebase path, and Twilio template SIDs.
 - [x] Strengthen call-window rematerialization; service-level code now rematerializes planned calls for onboarded users through a shared materialization helper.
 - [x] Make draft-review notification dispatch production-complete with `app/tasks/draft_review.py`, WhatsApp template/freeform overflow sends, dedup keys, and sent-at stamping.
@@ -106,7 +107,7 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 - [x] Fixed dashboard date boundaries to use each user's timezone instead of server-local `date.today()`.
 - [x] Fixed dashboard streak calculation so best streak is not capped by the 84-day heatmap window.
 - [x] Added tests for dashboard metrics: weekly calls, goal percentage, timezone boundaries, and long streaks.
-- [ ] Implement the web chat frontend if `.kiro/specs/minimal-chatbot-app` is still in scope; current UI lives in `website`, not `frontend`.
+- [x] Implement the authenticated web chat frontend in the active `website` app at `/chat`, backed by `/api/chat/stream` with `/api/chat` fallback helpers.
 - [x] Implement `/api/chat/stream` SSE for the minimal chatbot spec.
 - [x] Explicitly de-scope browser voice `/ws/live/{session_id}` with a machine-readable unsupported WebSocket response; Twilio voice remains the active production voice path.
 - [x] Add dashboard call history API path.
@@ -123,19 +124,19 @@ This audit compares the specs, `TODO.md`, `README.md`, implementation, tests, an
 
 ## Test Coverage TODO
 
-- [x] Ran backend verification: `uv run pytest -q` passed with `817 passed, 1 skipped, 73 warnings`.
-- [x] Ran frontend verification: `npm run build` passed for the website app.
+- [x] Ran backend verification: `uv run pytest -q` passed with `825 passed, 1 skipped, 73 warnings`.
+- [x] Ran frontend verification: `npm run test`, `npm run lint`, and `npm run build` passed for the website app.
 - [x] Add ADK eval datasets for core scenarios: onboarding completion, task capture, task completion, calendar scheduling, Gmail reply, call management, and refusal/error handling.
 - [x] Add tests that assert task-tool registration and required ADK schemas for update/delete/snooze/unsnooze/list-pending parity.
 - [x] Add tests that assert voice task-tool registration and callback payloads for update/delete/snooze/unsnooze/list-pending parity.
 - [x] Add tests for GoalService lifecycle behavior plus ADK and voice goal CRUD tool payloads.
 - [x] Add tests that assert exact root-agent tool registration against the full-tools spec.
 - [x] Add tests that assert exact voice-tool registration against the full-tools spec.
-- [ ] Add prompt/tool behavior tests that check semantic outputs instead of only substring presence.
+- [x] Add prompt/tool behavior tests that check semantic outputs instead of only substring presence.
 - [x] Add Gmail tests for search, read, compose, and archive once implemented.
 - [x] Add Calendar tests for date-range reads and event CRUD once implemented.
-- [ ] Add WhatsApp draft-approval endpoint tests through the real route, not only lower-level helpers.
-- [ ] Add frontend component or Playwright tests for dashboard, onboarding, integrations, and future chat/voice surfaces.
+- [x] Add WhatsApp draft-approval endpoint tests through the real route, not only lower-level helpers.
+- [x] Add frontend component tests for dashboard, login/onboarding entry, integrations, and authenticated chat surfaces.
 - [x] Add opt-in staging smoke tests for deployed readiness; live Twilio/Google/Gemini transaction checks remain gated by staging credentials.
 
 ## Recommended Priority Order

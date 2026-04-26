@@ -20,7 +20,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.models.email_draft_state import EmailDraftState
+from app.models.enums import DraftStatus
+from app.models.user import User
 from app.voice.cleanup import (
+    _dispatch_draft_review,
     _missing_outcome_fallback_fields,
     _save_transcript_file,
     post_call_cleanup,
@@ -126,6 +130,20 @@ def _mock_user(user_id: int = 42):
     u.consecutive_active_days = 0
     u.last_active_date = None
     return u
+
+
+class _SessionFactory:
+    def __init__(self, session):
+        self.session = session
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 class TestPostCallCleanup:
@@ -370,3 +388,41 @@ class TestPostCallCleanup:
 
         # No transcript file should be created
         assert not (tmp_path / "transcript_7.json").exists()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_draft_review_enqueues_pending_draft(self, session):
+        """A pending draft is queued through the real draft-review task."""
+        user = User(phone="+15558881234", name="Draft User", timezone="UTC")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        draft = EmailDraftState(
+            user_id=user.id,
+            thread_id="thread-draft",
+            original_email_id="msg-draft",
+            original_from="Sarah <sarah@example.com>",
+            original_subject="Project",
+            original_message_id="<msg-draft@example.com>",
+            draft_text="Looks good.",
+            status=DraftStatus.PENDING_REVIEW.value,
+        )
+        session.add(draft)
+        await session.commit()
+        await session.refresh(draft)
+
+        with (
+            patch(
+                "app.voice.cleanup.async_session_factory",
+                _SessionFactory(session),
+            ),
+            patch("app.tasks.draft_review.send_draft_review") as task,
+        ):
+            task.apply_asyncx = AsyncMock()
+
+            await _dispatch_draft_review(user.id)
+
+        task.apply_asyncx.assert_awaited_once_with(
+            args=[draft.id],
+            countdown=60,
+        )

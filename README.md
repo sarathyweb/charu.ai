@@ -8,7 +8,7 @@ Charu places scheduled voice calls (morning, afternoon, evening) to help users s
 
 ```
 User ──► WhatsApp ──► Twilio webhook ──► FastAPI ──► Google ADK (Gemini 3.1 Pro)
-User ──► Authenticated chat API ──► FastAPI REST ──► Google ADK
+User ──► Authenticated website chat ──► FastAPI SSE/REST ──► Google ADK
 User ◄── Voice call ◄── Twilio Media Streams ◄── Pipecat + Gemini Live
 ```
 
@@ -20,7 +20,7 @@ User ◄── Voice call ◄── Twilio Media Streams ◄── Pipecat + Gem
 - SQLModel + PostgreSQL (data), Redis (cache, task queue, ephemeral tokens)
 - Firebase Phone/OTP auth (web), Twilio signature validation (WhatsApp)
 - Google OAuth 2.0 for Calendar and Gmail integration
-- Next.js dashboard frontend (standalone output)
+- Next.js website/dashboard/chat frontend (standalone output)
 
 ## Features
 
@@ -31,6 +31,7 @@ User ◄── Voice call ◄── Twilio Media Streams ◄── Pipecat + Gem
 - Google Calendar integration (today/range reads, event CRUD, available gaps, create time blocks)
 - Gmail integration (search/read, compose/send, archive, reviewed reply drafts, send approved replies)
 - Web search through the ADK text agent
+- Authenticated website chat backed by the same ADK agent and phone identity
 - Post-call WhatsApp recaps and midday check-ins
 - Weekly progress summaries
 - Dashboard with streaks, heatmap, and goal completion stats

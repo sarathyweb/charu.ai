@@ -162,6 +162,40 @@ def test_adk_eval_tool_trajectories_reference_registered_tool_schemas():
                     )
 
 
+def test_adk_eval_references_satisfy_semantic_behavior_contracts():
+    """References should encode behavior, not just contain scenario strings."""
+    raw = json.loads(ADK_EVALSET.read_text(encoding="utf-8"))
+    invocations = raw[0]["data"]
+
+    by_query = {invocation["query"]: invocation for invocation in invocations}
+
+    task_capture = by_query["Remember that I need to file taxes tomorrow."]
+    assert task_capture["expected_tool_use"][0]["tool_name"] == "save_task"
+    assert _has_any(task_capture["reference"], {"saved", "added", "remembered"})
+    assert not _has_any(task_capture["reference"], {"deleted", "removed"})
+
+    task_completion = by_query["I finished filing taxes."]
+    assert task_completion["expected_tool_use"][0]["tool_name"] == (
+        "complete_task_by_title"
+    )
+    assert _has_any(task_completion["reference"], {"done", "marked", "completed"})
+
+    risky_send = by_query["Send that draft right now, I guess."]
+    assert risky_send["expected_tool_use"] == []
+    assert _has_any(risky_send["reference"], {"confirm", "approval", "clearly"})
+    assert not _has_any(risky_send["reference"], {"sent", "emailed", "delivered"})
+
+    callback = by_query["Call me back in 15 minutes."]
+    assert callback["expected_tool_use"][0]["tool_name"] == "schedule_callback"
+    assert _has_any(callback["reference"], {"callback", "call"})
+    assert "15" in callback["reference"]
+
+
+def _has_any(text: str, words: set[str]) -> bool:
+    lowered = text.lower()
+    return any(word in lowered for word in words)
+
+
 def test_deferred_product_backlog_review_is_complete_and_actionable():
     review = json.loads(BACKLOG_REVIEW.read_text(encoding="utf-8"))
     items = {item["id"]: item for item in review["items"]}

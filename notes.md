@@ -186,6 +186,14 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: Twilio Media Streams and browser microphone streaming have different auth, codec, and playback requirements. A machine-readable unsupported WebSocket response is safer than a missing route or an overclaimed implementation.
   Source: `.pm/research/84-voice-reliability-feature-closure.md`
 
+- 2026-04-26: The minimal web chat frontend is implemented in the active `website` Next.js app instead of creating a second `frontend` app.
+  Rationale: `website` is already the production authenticated frontend with Firebase auth, app routing, dashboard navigation, and tests. Duplicating a separate frontend would split auth/API wiring and make product parity harder to verify.
+  Source: `.pm/research/88-pending-feature-closure-audit.md`
+
+- 2026-04-26: Onboarding remains strict: name, timezone, morning/afternoon/evening call windows, Calendar, and Gmail must be present before `complete_onboarding`.
+  Rationale: skip/decline paths alter scheduling semantics and Google-tool availability. They should be specified as a product change with user controls and downstream behavior before changing the production onboarding gate.
+  Source: `.pm/research/88-pending-feature-closure-audit.md`
+
 ## Tech Stack
 
 - Python 3.10+

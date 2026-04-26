@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import time as _time
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -372,6 +374,74 @@ class TestVoiceStreamContextLoading:
             result = await _transition_call_to_in_progress(1)
 
         assert result is None
+
+
+class TestVoiceStreamPipelineIntegration:
+    """Normal stream completion connects pipeline transcript to cleanup."""
+
+    @pytest.mark.asyncio
+    async def test_successful_stream_runs_pipeline_and_post_call_cleanup(self):
+        from app.api.voice import voice_stream
+
+        token = _make_token(call_log_id=1, user_id=42)
+        messages = _make_start_message(token=token)
+        websocket = AsyncMock()
+        websocket.accept = AsyncMock()
+        websocket.receive_text = AsyncMock(side_effect=messages)
+        websocket.close = AsyncMock()
+        runner = SimpleNamespace(run=AsyncMock())
+        transcript_dicts = [
+            {
+                "role": "user",
+                "content": "I will start with taxes.",
+                "timestamp": "2026-04-26T12:00:00Z",
+            }
+        ]
+        transcript = SimpleNamespace(
+            entries=transcript_dicts,
+            first_user_utterance_at=datetime.now(timezone.utc),
+            to_dicts=lambda: transcript_dicts,
+        )
+        pipeline_result = SimpleNamespace(
+            runner=runner,
+            task=object(),
+            transcript=transcript,
+        )
+
+        with (
+            patch("app.api.voice.get_settings", return_value=_mock_settings()),
+            patch(
+                "app.api.voice._transition_call_to_in_progress",
+                AsyncMock(return_value=_mock_call_log(status="in_progress")),
+            ),
+            patch(
+                "app.api.voice._load_system_instruction_for_call",
+                AsyncMock(return_value=("system instruction", {"approach": "task_led"})),
+            ),
+            patch(
+                "app.voice.pipeline.assemble_pipeline",
+                AsyncMock(return_value=pipeline_result),
+            ) as assemble,
+            patch(
+                "app.voice.cleanup.post_call_cleanup",
+                AsyncMock(),
+            ) as cleanup,
+            patch("app.api.voice.delete_call_context", AsyncMock()) as delete_cache,
+        ):
+            await voice_stream(websocket)
+
+        websocket.accept.assert_awaited_once()
+        websocket.close.assert_not_awaited()
+        assemble.assert_awaited_once()
+        runner.run.assert_awaited_once_with(pipeline_result.task)
+        cleanup.assert_awaited_once_with(
+            call_log_id=1,
+            user_id=42,
+            call_type="morning",
+            transcript_dicts=transcript_dicts,
+            call_ctx={"approach": "task_led"},
+        )
+        delete_cache.assert_awaited_once_with(1)
 
 
 class TestVoiceStreamStartMessageParsing:
