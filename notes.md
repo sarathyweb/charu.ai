@@ -166,6 +166,14 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
   Rationale: live model evals are valuable but should be backed by source-controlled contracts that fail deterministically when tool names, schemas, confirmation gates, voice safety flags, or core scenario coverage drift.
   Source: `.pm/research/81-deterministic-adk-voice-evals-and-backlog.md`
 
+- 2026-04-26: The website dashboard should expose the backend dashboard APIs as one authenticated dashboard surface and use Vitest/React Testing Library for deterministic UI/API wiring tests.
+  Rationale: the dashboard is a client-component app surface backed by authenticated FastAPI endpoints, so component/integration tests can verify request paths, payloads, and visible controls without a running browser server. This closes the gap between backend API completion and product-facing availability.
+  Source: `.pm/research/85-website-dashboard-ui-api-parity.md`, `.pm/research/86-website-frontend-tests.md`
+
+- 2026-04-26: The marketing website should lead with a full-bleed product scene, concrete proof signals, and realistic dashboard/phone previews rather than abstract decorative gradients.
+  Rationale: the product is trust-sensitive and behavior-changing, so visitors need to immediately understand what Charu is, how it shows up, and what the working product surface looks like. Structured product visuals and proof hierarchy create more trust than decorative background art.
+  Source: `.pm/research/87-website-world-class-polish.md`
+
 - 2026-04-26: Voice Google Search is registered as a Gemini Live custom tool, while voice call-window CRUD is registered as direct Pipecat functions over `CallWindowService`.
   Rationale: Google Search grounding is server-side in Gemini Live and has no local function callback, while recurring call-window mutations are application-owned state changes that need local validation, persistence, and rematerialization side effects.
   Source: `.pm/research/82-voice-full-tools-parity.md`
